@@ -73,4 +73,15 @@ class Hosting:
             raise web.HTTPNotFound()
         if relative == "config.js":
             return web.Response(text=path.read_text(encoding="utf-8-sig") + self.overlay(), content_type="application/javascript", headers={"Cache-Control": "no-store"})
+        if relative == "res/class/EchoLiveSystem.js" and self.version == "1.8.12":
+            # 1.8.12 inserts dependencies first but dynamic scripts default to
+            # async, so editor-help can execute before editor. Preserve explicit
+            # async resources, and execute the remainder in insertion order.
+            source = path.read_text(encoding="utf-8-sig")
+            source = source.replace("if (async) script.async = true;", "script.async = Boolean(async);")
+            return web.Response(text=source, content_type="application/javascript", headers={"Cache-Control": "no-store"})
+        if relative == "res/class/UniverseWindow.js" and self.version == "1.8.12":
+            source = path.read_text(encoding="utf-8-sig")
+            source = source.replace("if (data.closable) $(`.fh-window", "if (this.windowList[index]?.data?.closable !== false) $(`.fh-window")
+            return web.Response(text=source, content_type="application/javascript", headers={"Cache-Control": "no-store"})
         return web.FileResponse(path)

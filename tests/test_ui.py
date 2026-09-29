@@ -104,7 +104,7 @@ async def test_history_mouse_selection_keeps_input_focus(tmp_path):
 
 
 async def test_footer_links_and_embedded_endpoints(tmp_path):
-    from echolivetui.ui import EndpointsScreen, EndpointPanel
+    from echolivetui.ui import EndpointsScreen, EndpointPanel, LanScreen
     app = EchoApp(Settings(tmp_path / "s.yaml"), tmp_path, start_server=False)
     async with app.run_test(size=(80, 24)) as pilot:
         await pilot.click("#settings-link")
@@ -124,6 +124,16 @@ async def test_footer_links_and_embedded_endpoints(tmp_path):
         await pilot.click("#endpoints-link")
         await pilot.pause()
         assert isinstance(app.screen, EndpointsScreen)
+        await pilot.press("escape")
+        await pilot.click("#pair-link")
+        await pilot.pause()
+        assert isinstance(app.screen, LanScreen)
+        buttons = [app.screen.query_one("#" + name) for name in ("lan-enable", "lan-disable", "lan-copy", "lan-refresh", "lan-back")]
+        assert all(button.region.right <= app.screen.size.width for button in buttons)
+        assert all(a.region.right <= b.region.x for a, b in zip(buttons, buttons[1:]))
+        await pilot.press("escape")
+        assert app.focused is app.query_one("#entry", Input)
+        await pilot.click("#exit-link")
 
 
 async def test_banner_is_excluded_from_history_selection(tmp_path):

@@ -8,11 +8,12 @@ import tempfile
 from playwright.async_api import async_playwright
 from echolivetui.config import Settings
 from echolivetui.core import Core
+from echolivetui.lan import choose_address
 
 
 async def main():
     root = Path(sys.argv[1] if len(sys.argv) > 1 else ".reference/Echo-Live").resolve()
-    before = hashlib.sha256((root / "config.js").read_bytes()).hexdigest()
+    before = {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in ("config.js", "res/class/EchoLiveSystem.js", "res/class/UniverseWindow.js") if (root / name).is_file()}
     with tempfile.TemporaryDirectory() as temporary:
         settings = Settings(Path(temporary) / "s.yaml")
         settings.values.update({"message.typewriting": False, "message.quote": False, "typing.enable": True})
@@ -21,6 +22,8 @@ async def main():
         await core.server.start("127.0.0.1", 0)
         port = core.server.site._server.sockets[0].getsockname()[1]
         url = f"http://127.0.0.1:{port}"
+        lan = choose_address()
+        await core.server.set_lan(lan)
         failures, errors = [], []
         try:
             async with async_playwright() as pw:
@@ -51,14 +54,27 @@ async def main():
                 assert await pages[2].evaluate("config.history.message.latest_message_hide") is False
                 assert await pages[0].evaluate("echo.printSpeedStart") == settings["message.print_speed"]
                 assert await pages[0].evaluate("config.editor.websocket.disable_broadcast") is True
+                editor = await context.new_page()
+                editor.on("pageerror", lambda error: errors.append(error.stack))
+                await editor.goto(f"http://{lan}:{port}/editor.html")
+                await editor.locator('.fh-window-controller-button[data-controller-id="no"]').click()
+                await editor.locator("#ptext-content").fill("LAN_EDITOR_TEST")
+                await editor.locator("#ptext-btn-send").click()
+                for page in pages:
+                    await page.bring_to_front()
+                    await page.wait_for_function("document.body.textContent.includes('LAN_EDITOR_TEST')", polling=100)
+                assert (await pages[2].locator("#echo-live-history-message-list").text_content()).count("LAN_EDITOR_TEST") == 1
+                assert any(p.profile.role == "server" for p in core.hub.peers.values())
+                assert any("LAN_EDITOR_TEST" in line for line in logs)
+                await core.server.set_lan(None)
                 assert not failures, failures
                 assert not errors, errors
-                print(f"PASS {core.server.hosting.version}: two live pages, one history entry, no missing resources or page errors", flush=True)
+                print(f"PASS {core.server.hosting.version}: LAN editor, two live pages, independent history without duplicates, no missing resources or page errors", flush=True)
                 await context.close()
                 await browser.close()
         finally:
             await core.close()
-        assert hashlib.sha256((root / "config.js").read_bytes()).hexdigest() == before
+        assert {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in before} == before
 
 
 asyncio.run(main())

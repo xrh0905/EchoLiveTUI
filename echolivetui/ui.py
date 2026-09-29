@@ -493,6 +493,7 @@ class EchoApp(App, inherit_bindings=False):
     #endpoint-refresh { height: 3; }
     #lan-entry { height: 3; }
     #lan-content { height: 1fr; }
+    LanScreen .actions Button { min-width: 0; width: 1fr; padding: 0; }
     #lan-state, #lan-url, #lan-clients, #lan-error { height: auto; margin-bottom: 1; }
     #lan-error { color: #ffaaa0; }
     #lan-qr { width: auto; height: auto; background: white; color: black; margin: 1 0; }

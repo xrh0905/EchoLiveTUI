@@ -121,3 +121,15 @@ live ─────── BroadcastChannel ──→ history
 - [1.8.12 配置](https://github.com/sheep-realms/Echo-Live/blob/44ff7288e5c3d9dc218947e01220b94fb2f6d6b7/config.js)、[设置保存](https://github.com/sheep-realms/Echo-Live/blob/44ff7288e5c3d9dc218947e01220b94fb2f6d6b7/res/script/settings.js)。
 - [旧客户端协议](https://github.com/xrh0905/echo-client/blob/deb2f07d3dc1e422c495966e912be9fea3a8ed78/echo_client/protocol.py)、[旧服务实现](https://github.com/xrh0905/echo-client/blob/deb2f07d3dc1e422c495966e912be9fea3a8ed78/echo_client/server.py)。
 - [用户提供的 Echo 开发入口](https://sheep-realms.github.io/Echo-Live-Doc/dev/echo/)明确提示文档可能滞后；[广播 API](https://sheep-realms.github.io/Echo-Live-Doc/dev/broadcast/api/)与标签源码联合使用。
+
+
+## 阶段 1.5 实际浏览器兼容修正
+
+针对 1.8.12 的 HTTP 响应增加两处有限修正，保留磁盘文件：
+
+- `ResourceLoader._loadScript` 动态 script 默认 async，虽然递归插入依赖，实际执行可能倒序，导致 editor-help 的 `uniWindow` / `localStorageManager` 尚未初始化。将未显式声明 async 的脚本设为 `async=false`，按插入顺序执行。
+- `UniverseWindow.autoSetFocusButton` 无按钮分支引用不存在的 `data.closable`。改为查询对应 windowList 记录。
+
+真实 Edge 测试覆盖 LAN editor 按钮发送、两路字幕显示、独立 history 恰好一条、TUI 远程消息记录以及关闭 LAN。三个响应覆盖文件的磁盘 SHA256 在测试前后相同。源文件已修复或不匹配时，精确替换不会修改其他代码。
+
+`websocket_heartbeat` 原目标是 `@__ws_server`；ELTUI 将其原 sender/data 转发给每个 server 的 UUID，兼容 targeted server。不会作为内容历史或转发给字幕/history。server 的 message_data 则独立生成 TUI 和 history 记录，不等待 live 回报。
