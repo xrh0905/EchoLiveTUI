@@ -1,0 +1,52 @@
+name: Test and package
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[test]'
+      - run: python -m pytest -q
+  package:
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    needs: test
+    runs-on: windows-2022
+    strategy:
+      matrix:
+        mode: [standalone, onefile]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[build]'
+      - run: python scripts/build.py --mode ${{ matrix.mode }} --jobs 4
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows-${{ matrix.mode }}
+          path: dist/*
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v7
+      - name: Collect and publish verified packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download "$GITHUB_RUN_ID" --pattern 'windows-*' --dir artifacts
+          gh release create "$GITHUB_REF_NAME" artifacts/windows-*/* --verify-tag --generate-notes --title "EchoLiveTUI $GITHUB_REF_NAME"
