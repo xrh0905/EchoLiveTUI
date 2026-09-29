@@ -158,7 +158,7 @@ class Hub:
             profile = dest.profile
             if not target_matches(envelope.get("target"), profile, targeted=False if action == "ping" else None):
                 continue
-            discovery = action in {"ping", "hello", "page_hidden", "page_visible", "echo_state_update", "error"}
+            discovery = action in {"ping", "hello", "close", "page_hidden", "page_visible", "echo_state_update", "echo_printing", "live_display_update", "error", "error_unknown"}
             accepted = profile.accepts(action) or (discovery and (profile.role == "server" or action == "ping"))
             if action in {"echo_printing", "live_display_update"} and profile.role == "history":
                 # Live playback feedback must not create a second history record
@@ -167,6 +167,8 @@ class Hub:
             if accepted:
                 if not dest.enqueue(envelope, fast=action != "message_data"):
                     self.log(f"写入失败：{profile.name} 队列已满", "error")
+        if action == "close":
+            await self.disconnect(peer)
         return peer
 
     def broadcast(self, data, delay):

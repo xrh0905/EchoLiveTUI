@@ -2,7 +2,34 @@
 
 面向 Echo Live 的 Python / Textual 终端编辑器，优先满足直播时的文字输入、广播和端点控制。
 
-当前仓库包含**第一版设计与上游兼容性调查**，尚未实现可运行的 TUI。
+当前已实现可运行的第一版：Python 3.12+、Textual、aiohttp。主屏持续聚焦输入框，历史区域支持鼠标框选复制；设置和多行编辑使用独立弹窗。
+
+## 启动
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python -m pip install -e ".[test]"
+.\.venv\Scripts\python -m echolivetui
+```
+
+也可以运行安装后的 `echolivetui` 命令。默认监听 `127.0.0.1:3000`，WS 接口为 `/ws`（兼容根路径 WS）。配置位于启动工作目录的 `echolivetui.yaml`，或使用 `--config 文件路径`。通过 `--import-legacy 旧config.yaml` 显式导入旧设置，不修改原文件，不导入 `skip_mode`。
+
+在 Echo Live 目录中运行会自动托管当前目录，OBS 使用 `http://127.0.0.1:3000/live.html`，历史页使用 `/history.html`。只覆盖 HTTP 返回的 `config.js`，磁盘文件不变；网页 `settings.html` 获得原配置。其他目录只启动 WS 服务，不扫描或管理安装目录。
+
+## 常用操作
+
+- 输入文字并按 Enter；`//settings` 发送字面量 `/settings`。
+- `/settings` 打开设置；`/settings log` 调整日志；`/settings history` 调整 ELTUI 历史策略。
+- `/name 名字`、`/quote [on|off|en|cn|jp|custom]`、`/paren once|on|off`。
+- `/endpoints` 查看客户端档案及能力覆盖；`/target set UUID或@名称`、`/target exclude ...`、`/target all`。
+- `/compose` 编辑多行消息；多行粘贴也会打开此页，不执行粘贴的命令。
+- `/history clear` 清空历史端；`/help` 查看完整命令；`/quit` 退出。
+
+默认发送给所有在线字幕端，包括仅接收定向广播的字幕端。历史端独立从已接受消息生成记录，不依赖字幕端打印回报；只有历史端在线也可发送。托管配置关闭上游“隐藏最新一条”，默认立即显示历史；可选择由 ELTUI 暂存最新一条，直到下一条消息到达。非托管页面需手动关闭 `history.message.latest_message_hide` 和 `live_display_hidden_latest_message_show`。
+
+默认日志级别 `error`，只报告写入失败，不逐端输出成功或连接日志；主屏保留用户消息记录。`info` 显示连接、接受和写入结果，`debug` 额外显示无效协议消息。框选历史后可用 Ctrl+C 复制，未选中文字时 Ctrl+C 默认不退出。窗口标题栏、状态栏和历史区均不夺取输入焦点。
+
+独立 WS 使用时，页面应只经 WS 发送：启用 WS，设置对应地址，并设置 `editor.websocket.disable_broadcast=true`。混合使用独立 BroadcastChannel 仍可能绕过 ELTUI 的去重边界。未知客户端版本不会自动获得 typing 能力，可在端点页手动指定。
 
 - [第一版设计](docs/v1-design.md)：范围、界面、广播路由、端点设置、按当前目录托管、配置响应覆盖、实施与验收。
 - [1.6.6 → 1.8.12 差异和适配缺口](docs/upstream-compatibility.md)：源码结论、旧客户端缺陷、优先级和证据。
@@ -10,7 +37,7 @@
 
 ## 复现调查
 
-需要 Git、Python 3.12+；行为探针另外需要 Node.js，Node 不是计划中的产品运行依赖。
+需要 Git、Python 3.12+；行为探针另外需要 Node.js，Node 不是产品运行依赖。
 
 ```powershell
 git clone https://github.com/sheep-realms/Echo-Live.git .reference/Echo-Live
@@ -23,6 +50,22 @@ node scripts/probe-upstream.cjs
 输出位于 `.reference/audit/comparison.json` 和 `.reference/audit/upstream.patch`；该目录不提交、不打包。
 
 行为探针直接调用两个上游版本的协议方法，使用内存浏览器与时钟替身。它验证协议假设，不代表通过了浏览器、OBS 或 TUI 端到端验收。
+
+## 验证
+
+```powershell
+.\.venv\Scripts\python -m pytest -q
+node scripts/probe-upstream.cjs
+```
+
+可选浏览器测试需要 `pip install playwright` 和 Windows 上已安装的 Edge：
+
+```powershell
+.\.venv\Scripts\python scripts/browser-smoke.py .reference/Echo-Live
+.\.venv\Scripts\python scripts/capture-ui.py
+```
+
+已验证上游 1.6.6、1.8.12 的真实浏览器双字幕/单历史链路、资源载入和配置文件哈希不变。OBS、Windows 中文输入法、终端剪贴板与 OBS 全局热键仍需实际使用环境验证。
 
 ## 第一版边界
 

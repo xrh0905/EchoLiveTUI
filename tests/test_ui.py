@@ -78,3 +78,26 @@ async def test_command_completion_does_not_execute(tmp_path):
         await pilot.pause()
         assert len(app.screen_stack) == 1
         assert app.query_one("#entry", Input).value.startswith("/settings")
+
+
+async def test_history_mouse_selection_keeps_input_focus(tmp_path):
+    from echolivetui.ui import HistoryLog
+    app = EchoApp(Settings(tmp_path / "s.yaml"), tmp_path, start_server=False)
+    async with app.run_test(size=(80, 24)) as pilot:
+        log = app.query_one(HistoryLog)
+        log.write("Selectable history 中文内容")
+        await pilot.pause()
+        entry = app.query_one("#entry", Input)
+        assert not log.can_focus
+        await pilot.mouse_down("#log", offset=(1, 0))
+        await pilot.hover("#log", offset=(19, 0))
+        await pilot.mouse_up("#log", offset=(19, 0))
+        await pilot.pause()
+        assert app.focused is entry
+        assert "Selectable" in app.screen.get_selected_text()
+        await pilot.press("ctrl+c")
+        assert "Selectable" in app.clipboard
+        await pilot.click("#top")
+        assert app.focused is entry and len(app.screen_stack) == 1
+        await pilot.press("tab")
+        assert app.focused is entry

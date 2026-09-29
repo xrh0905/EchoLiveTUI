@@ -52,6 +52,8 @@ class Profile:
         self.capabilities["typing"] = v >= (1, 8, 7) if v else None
 
     def accepts(self, action):
+        if self.role in {"live", "history", "character", "client"} and action in {"broadcast_close", "websocket_close", "shutdown"}:
+            return True
         if self.role == "live":
             return action in LIVE_ACTIONS and (action != "editor_typing" or self.capabilities["typing"] is True)
         if self.role == "history":

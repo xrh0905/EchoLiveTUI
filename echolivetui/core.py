@@ -92,8 +92,8 @@ class Core:
             self.typing_task = None
         self.typing_state = "待输入" if self.settings["typing.enable"] else "关闭"
 
-    def input_changed(self, text):
-        if not self.settings["typing.enable"] or not text or (text.startswith("/") and not text.startswith("//")):
+    def input_changed(self, text, *, literal=False):
+        if not self.settings["typing.enable"] or not text or (not literal and text.startswith("/") and not text.startswith("//")):
             self.cancel_typing()
             return
         if self.typing_task and not self.typing_task.done():
@@ -104,7 +104,8 @@ class Core:
         await asyncio.sleep(max(0, 1.5 - (time.monotonic() - self.last_typing)))
         self.last_typing = time.monotonic()
         count = self.hub.typing(format_username(self.settings.group("message")))
-        self.typing_state = f"已发 {count} 端" if count else "无支持目标"
+        unknown = any(p.profile.capabilities["typing"] is None for p in self.hub.targets())
+        self.typing_state = (f"已发 {count} 端" if count else "无支持目标") + (" · 部分未知" if unknown else "")
 
     async def close(self):
         self.cancel_typing()

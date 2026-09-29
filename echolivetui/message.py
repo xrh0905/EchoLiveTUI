@@ -519,13 +519,30 @@ def render(config: Dict[str, Any], messages: List[Dict[str, Any]]) -> str:
                 data["style"] = data["style"].copy()
         payload.append(data)
 
+    # The legacy parser's internal keys differ from Echo's wire format.
+    # Both 1.6.6 and 1.8.12 read segment speed, data.emoji and string classes.
+    for entry in payload:
+        custom = entry.get("data", {})
+        if "printSpeed" in custom:
+            entry["speed"] = custom.pop("printSpeed")
+        if "emoji" in entry:
+            custom["emoji"] = entry.pop("emoji")
+        if custom:
+            entry["data"] = custom
+        else:
+            entry.pop("data", None)
+        if isinstance(entry.get("class"), list):
+            entry["class"] = " ".join(entry["class"])
+        if isinstance(entry.get("style"), dict) and entry["style"].pop("code", False):
+            entry["style"]["style"] = "font-family: monospace;"
+
     return json.dumps(
         {
             "action": "message_data",
             "data": {
                 "username": username_value,
                 "messages": [
-                    {"message": payload},
+                    {"message": payload, "data": {"printSpeed": _coerce_positive_int(config.get("print_speed")) or DEFAULT_PRINT_SPEED}},
                 ],
             },
         }

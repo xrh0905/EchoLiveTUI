@@ -72,7 +72,7 @@ live ─────── BroadcastChannel ──→ history
 - 该开关只禁止 BC 发送，不禁止 BC 接收。受托管页面还应使用本次进程专有的 channel，与同源的非托管页面隔离。
 - 不要设 `echolive.broadcast.enable = false`：它会阻止广播对象建立，WS 也随之不可用。
 - 不要用“相同文本 + 时间窗”吞消息：用户可能故意重复发送。`allow_send_duplicate_message` 与 `history.message.remove_continuous_duplicate` 是展示行为，不是网络去重协议。
-- 即使只有 WS，两个 live 同时打印同一字幕仍会生成两个不同来源的 `echo_printing`。历史端点绑定一个 live 来源解决这个独立问题；不能仅靠禁止回发给发送 socket。
+- 即使只有 WS，两个 live 同时打印同一字幕仍会生成两个不同来源的 `echo_printing`。当前实现由 ELTUI 从已接受消息独立生成历史，字幕打印回报不再送给 history；不依赖内容哈希或 live 来源绑定。
 - 外部手动配置的页面不受响应覆盖控制，必须在它们的原配置中采用同样的 WS 单路径设置。第一版不承诺修复任意混合拓扑。
 
 ## 5. 输入状态：实际协议
@@ -110,7 +110,9 @@ live ─────── BroadcastChannel ──→ history
 
 已运行 `python scripts/audit-upstream.py` 和 `node scripts/probe-upstream.cjs`。后者 **18 项通过**，覆盖两个版本的目标类型/顺序、双通道发送、禁广播作用范围、WS 不自动回播、history action、typing 能力，以及新版超时和同 UUID 清理。
 
-探针用 Node VM 执行实际标签中的方法，仅替代浏览器环境、计时器和初始化；尚未运行真实 OBS、浏览器或新版应用。完整端到端验收见设计文档。
+探针用 Node VM 执行实际标签中的方法，仅替代浏览器环境、计时器和初始化。实施后另已运行 1.6.6/1.8.12 的 Edge 无头浏览器双字幕/单历史检查；OBS 与真实输入法/热键仍待人工验收。
+
+实施期间还修正了旧消息渲染的线格式：分段速度映射到 `speed`，整条速度放入消息级 `data.printSpeed`，表情放入 `data.emoji`，多个 class 以空格连接。这些格式在两个参考版本中一致。
 
 主要源码：
 

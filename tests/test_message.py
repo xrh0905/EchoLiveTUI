@@ -32,6 +32,15 @@ def test_parse_message_supports_escaped_at_and_event_token() -> None:
     assert any(entry.get("event") == "shout" for entry in parsed)
 
 
+def test_wire_format_adapts_legacy_emoji_classes_and_speed():
+    config = dict(DEFAULT_CONFIG, typewriting=False, print_speed=7)
+    payload = json.loads(render(config, parse_message("@{smile} @<a>@<b>`code`")))
+    message = payload["data"]["messages"][0]
+    assert message["data"]["printSpeed"] == 7
+    assert any(p.get("data", {}).get("emoji") == "smile" for p in message["message"])
+    assert all(isinstance(p["class"], str) for p in message["message"] if "class" in p)
+
+
 def test_autopause_delay_and_render_payload() -> None:
     config = DEFAULT_CONFIG.copy()
     config.update(
@@ -54,7 +63,7 @@ def test_autopause_delay_and_render_payload() -> None:
     assert get_delay(config, messages) > 0
     assert payload["action"] == "message_data"
     rendered_entries = payload["data"]["messages"][0]["message"]
-    assert all(entry.get("data", {}).get("printSpeed") == 5 for entry in rendered_entries if entry.get("text"))
+    assert all(entry.get("speed") == 5 for entry in rendered_entries if entry.get("text"))
     assert any("typewrite" in entry for entry in rendered_entries if entry.get("text"))
 
 

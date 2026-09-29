@@ -8,7 +8,11 @@ def plain_message(message):
     if isinstance(message, list):
         return "".join(plain_message(item) for item in message)
     if isinstance(message, dict):
-        return str(message.get("text", ""))
+        data = message.get("data", {})
+        prefix = f" [{data['emoji']}] " if isinstance(data, dict) and data.get("emoji") else ""
+        if isinstance(data, dict) and "image" in data:
+            prefix += " [图片] "
+        return prefix + str(message.get("text", ""))
     return ""
 
 

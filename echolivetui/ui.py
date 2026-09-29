@@ -2,12 +2,15 @@
 from __future__ import annotations
 import copy
 from datetime import datetime
+from rich.text import Text
+from rich.cells import cell_len
 from textual import events, on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.message import Message
 from textual.screen import ModalScreen
+from textual.strip import Strip
 from textual.widgets import Button, Checkbox, Input, Label, Select, RichLog, Static, TextArea
 from .commands import HELP, execute, parse
 from .config import FIELDS, Settings, coerce
@@ -15,7 +18,32 @@ from .core import Core
 from .pipeline import quote_symbols
 
 
+class HistoryLog(RichLog, can_focus=False):
+    """Wrapped, mouse-selectable records which never take keyboard focus."""
+    def get_selection(self, selection):
+        return selection.extract("\n".join(line.text for line in self.lines)), "\n"
+
+    def selection_updated(self, selection):
+        self.refresh()
+
+    def render_line(self, y):
+        scroll_x, scroll_y = self.scroll_offset
+        row = scroll_y + y
+        width = self.scrollable_content_region.width
+        if row >= len(self.lines):
+            return Strip.blank(width, self.rich_style)
+        text = Text(self.lines[row].text, style=self.rich_style, no_wrap=True)
+        selection = self.text_selection
+        if selection is not None and (span := selection.get_span(row)) is not None:
+            start, end = span
+            text.stylize(self.screen.get_component_rich_style("screen--selection"), start, len(text) if end == -1 else end)
+        return Strip(text.render(self.app.console), cell_len(text.plain)).crop_extend(scroll_x, scroll_x + width, self.rich_style).apply_offsets(scroll_x, row)
+
+
 class ComposerInput(Input):
+    def on_blur(self):
+        self.app.core.cancel_typing()
+
     class Multiline(Message):
         def __init__(self, text):
             super().__init__()
@@ -46,8 +74,8 @@ class SettingsScreen(ModalScreen):
         with Vertical(id="dialog"):
             yield Label("设置 · 修改后保存应用；Esc 保留草稿返回", classes="title")
             with Horizontal(classes="filters"):
-                groups = ("input", "typewriting", "formatting", "typing", "network", "endpoints", "history", "log", "osc", "all", "message")
-                yield Select([(g, g) for g in groups], value={"listen": "network"}.get(self.group, self.group), allow_blank=False, id="category")
+                groups = [("通用与输入", "input"), ("模拟打字", "typewriting"), ("消息修饰", "formatting"), ("输入提示", "typing"), ("网络与托管", "network"), ("端点与路由", "endpoints"), ("历史记录", "history"), ("日志", "log"), ("OSC", "osc"), ("全部设置", "all"), ("全部消息设置", "message")]
+                yield Select(groups, value={"listen": "network"}.get(self.group, self.group), allow_blank=False, id="category")
                 yield Input(placeholder="搜索名称或设置键", id="search")
             with VerticalScroll(id="fields"):
                 for key, field in FIELDS.items():
@@ -58,7 +86,7 @@ class SettingsScreen(ModalScreen):
                         label.tooltip = f"{key}\n默认：{field.default}\n{field.effect(key)}"
                         yield label
                         if isinstance(field.default, bool):
-                            yield Checkbox(value=value, id=wid, name=key)
+                            yield Select([("关闭", False), ("开启", True)], value=value, allow_blank=False, id=wid, name=key)
                         elif field.choices:
                             yield Select([(x, x) for x in field.choices], value=value, allow_blank=False, id=wid, name=key)
                         else:
@@ -74,6 +102,10 @@ class SettingsScreen(ModalScreen):
 
     def on_mount(self):
         self.filter_fields()
+        self.set_class(self.size.width < 70, "narrow")
+
+    def on_resize(self, event):
+        self.set_class(event.size.width < 70, "narrow")
 
     def filter_fields(self):
         group = self.query_one("#category", Select).value
@@ -140,6 +172,7 @@ class SettingsScreen(ModalScreen):
                     self.query_one("#settings-error", Static).update(loaded.load_error)
                     return
                 values = dict(loaded.values)
+                self.app.core.settings.load_error = ""
             else:
                 values = dict(self.app.core.settings.values)
             self.app.settings_draft = values
@@ -173,6 +206,7 @@ class ComposeScreen(ModalScreen):
     @on(TextArea.Changed)
     def changed(self, event):
         self.app.core.compose_draft = event.text_area.text
+        self.app.core.input_changed(event.text_area.text, literal=True)
 
     @on(Button.Pressed)
     def button(self, event):
@@ -313,14 +347,21 @@ class EchoApp(App, inherit_bindings=False):
     ModalScreen { align: center middle; background: #000000 65%; }
     #dialog { width: 94%; max-width: 110; height: 92%; padding: 1 2; border: solid #3f827b; background: #152530; }
     .title { height: 2; text-style: bold; }
-    .filters { height: 3; }
+    .filters { height: 4; padding-bottom: 1; }
     .filters Select { width: 20; }
     .filters Input { width: 1fr; }
     #fields, #endpoint-controls { height: 1fr; }
-    .setting-row { height: 3; }
-    .setting-row Label { width: 38%; content-align: left middle; }
+    .setting-row { height: 4; padding-bottom: 1; }
+    .setting-row Label { width: 38%; height: 3; content-align: left middle; padding-right: 1; }
     .setting-row Input, .setting-row Select { width: 1fr; }
     .setting-row Checkbox { width: 1fr; border: none; }
+    SettingsScreen.narrow .filters { layout: vertical; height: 7; }
+    SettingsScreen.narrow .filters Select, SettingsScreen.narrow .filters Input { width: 100%; }
+    SettingsScreen.narrow .setting-row { layout: vertical; height: 6; }
+    SettingsScreen.narrow .setting-row Label { width: 100%; height: 2; }
+    SettingsScreen.narrow .setting-row Input, SettingsScreen.narrow .setting-row Select { width: 100%; }
+    SettingsScreen.narrow .actions { height: 6; layout: grid; grid-size: 3; grid-gutter: 0; }
+    SettingsScreen.narrow .actions Button { width: 100%; min-width: 6; }
     .actions { height: 3; }
     .actions Button { min-width: 10; width: 1fr; }
     #settings-error, #compose-error, #endpoint-error { height: auto; color: #ffaaa0; max-height: 3; }
@@ -345,7 +386,7 @@ class EchoApp(App, inherit_bindings=False):
     def compose(self):
         yield Static("EchoLiveTUI", id="top", markup=False)
         yield Static("", id="route", markup=False)
-        yield RichLog(id="log", wrap=True, markup=False, max_lines=2000)
+        yield HistoryLog(id="log", wrap=True, markup=False, max_lines=2000)
         yield Static("", id="error", markup=False)
         yield Static("", id="context", markup=False)
         yield Static("", id="suggestions", markup=False)
@@ -473,13 +514,18 @@ class EchoApp(App, inherit_bindings=False):
         self.open_screen("compose")
 
     def on_click(self, event):
-        wid = getattr(event.widget, "id", None)
-        if wid in {"top", "route"}:
-            self.open_screen("endpoints")
-        elif wid in {"enhancements", "context"}:
-            self.open_screen("settings", ["message"])
+        if self.screen is self.screen_stack[0]:
+            self.query_one("#entry").focus(scroll_visible=False)
+
+    def on_mouse_down(self, event):
+        if self.screen is self.screen_stack[0]:
+            self.query_one("#entry").focus(scroll_visible=False)
 
     def action_interrupt(self):
+        selected = self.screen.get_selected_text()
+        if selected:
+            self.copy_to_clipboard(selected)
+            return
         if not self.core.settings["input.interrupt_guard"]:
             self.exit()
 

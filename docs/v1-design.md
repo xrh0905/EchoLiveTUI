@@ -1,6 +1,8 @@
 # EchoLiveTUI 第一版设计
 
-状态：可实施的设计，尚未实现产品。目标仓库：[xrh0905/EchoLiveTUI](https://github.com/xrh0905/EchoLiveTUI)。
+状态：第一版已实现并持续验证。目标仓库：[xrh0905/EchoLiveTUI](https://github.com/xrh0905/EchoLiveTUI)。运行入口与实际验证见 [README](../README.md)。
+
+2026-09-30 实施修订：默认广播到全部已连接 live；history 改为独立投递服务，取消 live 来源绑定；默认日志只报告写入失败；主屏历史区可框选复制但不可聚焦，主屏鼠标点击保持输入焦点。设置页布尔项使用带“开启/关闭”文字的选择框。
 
 ## 1. 产品目标与范围
 
@@ -16,7 +18,7 @@
 - **第一版即包含客户端识别与按能力适配**：区分具体客户端、页面职责、版本、连接来源和能力；后续局域网功能复用这一模型。
 - 1.8.12 为主验收版本；1.6.6 为基础广播兼容版本。中间版本使用同一协议适配，typing 能力在 1.8.7 引入，但完整输入提示验收针对 1.8.12。
 
-这次交付包含设计、源码差异和可复现探针；后面的实施阶段属于下一步应用开发。
+交付包含源码、设置与端点界面、消息流水线、上游差异、可复现探针和自动化验证。
 
 ## 2. 使用流程和界面
 
@@ -76,10 +78,10 @@ Enter 发送 · / 命令 · /settings 设置       输入提示：已发
 | `/quote [on\|off\|en\|cn\|jp\|custom]` | 高频引号切换；无参开/关，开启时恢复最近一次有效样式；指定样式时启用并立即显示实际符号 |
 | `/paren once\|on\|off` | 下一条临时括号或常驻括号；无参数显示当前状态，不隐式切换 |
 | `/endpoints` | 查看端点识别与连接状态；“设置”操作跳转 `/settings endpoints` 对应端点 |
-| `/target all` | 恢复向所有普通 live 发送，定向专用 live 默认不在其中 |
+| `/target all` | 恢复向所有在线 live 发送，包含定向专用 live，并清空排除项 |
 | `/target set <UUID或@名称> ...` | 替换明确的 live 选择，清空原排除项；先验证全部选择再生效 |
 | `/target exclude <UUID或@名称> ...` | 替换当前排除集合；不改变包含集合 |
-| `/target reset` | 恢复所有普通 live 并清空排除项；`all` 亦采用这一完整重置语义 |
+| `/target reset` | 与 all 相同，恢复全部在线 live 并清空排除项 |
 | `/history source <history> <live或auto>` | 设置历史来源，选择器为 UUID 或唯一名称 |
 | `/history clear` | 清空上游 history 页；遵循已配置的历史目标 |
 | `/status` | 有效监听地址、托管状态、目标、连接与错误摘要 |
@@ -130,7 +132,9 @@ Tab 切换控件 · 方向键选择 · Enter 操作 · Esc 返回输入
 | `typewriting` | 模拟打字开关、拼音/注音、打印速度、自动停顿字符与时长 |
 | `formatting` | 引号样式及自定义符号、括号、用户名括号、后缀；下一条临时修饰明确标为仅一次，不保存成永久开关 |
 | `typing` | 输入提示开关与状态说明，区分“模拟打字”与“正在输入提示” |
-| `endpoints` | 客户端档案、能力覆盖、目标选择/排除、历史来源绑定；识别结果本身只读，人工覆盖单独标注 |
+| `endpoints` | 客户端档案、能力覆盖、字幕目标选择/排除；识别结果本身只读，人工覆盖单独标注 |
+| `history` | 独立历史投递；由 ELTUI 暂存最新一条的可选策略，默认关闭 |
+| `log` | error/info/debug，默认 error；用户消息记录独立于诊断日志 |
 | `network` | 监听 host/port、展示地址、当前目录识别、托管地址、有效配置覆盖说明 |
 | `osc` | VRChat OSC 开关与目标地址/端口 |
 
@@ -261,7 +265,7 @@ Textual 和 aiohttp 共用 asyncio 循环，通过 AppRunner 管理服务，不�
 | 适配档案 | 针对性行为 |
 | --- | --- |
 | Echo Live live | 接收文字、下一条、显示控制；解析打印状态；typing 按版本/能力启用 |
-| Echo Live history | 消费绑定 live 的打印/显示事件和清空命令；不投递文字或 typing |
+| Echo Live history | 消费 ELTUI 独立生成的历史事件和清空命令；不接收 message_data 或 typing |
 | Echo Live character | 适配形象事件；不进入字幕目标列表 |
 | Echo Live editor | 作为内容生产者和状态观察者登记；支持 ping 发现与入站发送，不误识别为 live |
 | 其他 server | 保留 server 角色，按确认能力处理，不自动获得 editor 的所有行为 |
@@ -278,14 +282,14 @@ Adapter 由客户端实现、页面职责、版本和能力共同选择；版本
 - `hello` 根据上游 UUID 登记，`ping` 中的 `from.type=server` 也能登记网页编辑器；重复 hello 只更新状态。
 - 角色完整支持 `live/history/character/server/client/unknown`。未知会话显示为未识别，不默认当作 live。
 - 经识别器确认后更新名称与角色，UUID 是身份；同 UUID 新连接替代旧连接，清理旧连接时必须检查会话代次，不能删除新会话。
-- 默认文字目标是当前在线的普通 live（排除 `targeted=true`）；明确选择可包含定向 live。UI 在本地完成包含/排除计算，再输出 UUID 数组。
+- 默认文字目标是所有当前在线 live，包含 `targeted=true`。UI 在本地计算包含/排除项，再分别输出明确 UUID 目标。
 - 外部帧的 UUID、`@name`、`@__role` 和反选数组按上游算法与原顺序解释，不改成无序集合。原始 `target` 保留在转发帧中。
 - 名称重名时 UI 显示全部 UUID；本地 `/target set @name` 要求唯一，歧义时拒绝并保留草稿。外部 `@name` 按上游规则可匹配多个同名终端。
 - UUID 选择仅在本次会话有效；持久化使用唯一名称。名称不存在或重名时显示“待绑定/歧义”，不能悄悄退回广播给所有人。
 
 ### 路由表
 
-所有转发都先应用原 `target`；对本地命令使用计算后的明确目标。`@__ws_server` 控制帧在服务端消费，不扩散。原始有序目标算法先用两版源码探针建立一致性测试。
+上游帧转发应用原 `target`；本地字幕命令使用计算后的明确目标。独立历史记录由接收的原始消息生成，使用 ELTUI 来源及各历史端 UUID，不继承字幕目标。`@__ws_server` 控制帧在服务端消费，不扩散。
 
 | 动作 | 处理 |
 | --- | --- |
@@ -293,8 +297,8 @@ Adapter 由客户端实现、页面职责、版本和能力共同选择；版本
 | 网页 editor 的文字/输入/控制动作 | 保留来源，转发给符合目标的 live；其他 editor 只接收其目标本来允许的消息 |
 | `ping` | 发到目标匹配的终端以发现身份；客户端 `hello` 返回给匹配的 server 并登记 |
 | `hello`、`close`、`page_hidden/visible`、`echo_state_update` | 更新本地状态；按目标通知 editor/server 观察端；close 清理身份，不制造全局关闭 |
-| `echo_printing` | 记录端点打印事件；转发到绑定该 live 的 history，及匹配的 editor/server |
-| `live_display_update` | 同步状态；通知绑定的 history 与匹配的观察端 |
+| 字幕端 `echo_printing` | 转发给匹配的 editor/server 观察端，不重复写入 history |
+| `live_display_update` | 通知匹配的观察端，不改变独立历史显示策略 |
 | `history_clear` | 目标匹配的 history；不向 live 注入空消息 |
 | `set_avatar` | 目标匹配的 character；保留 live 派生形象事件 |
 | `websocket_heartbeat` | 更新会话活跃时间；无须广播给所有页面 |
@@ -302,13 +306,13 @@ Adapter 由客户端实现、页面职责、版本和能力共同选择；版本
 | 主题、显式断开等现有控制动作 | 按标准目标和角色转发；第一版不必为每个动作制作单独 UI |
 | 未知动作 | 记录一次诊断，不自动执行或无条件泛洪 |
 
-### 历史来源
+### 独立历史投递
 
-history 不消费 `message_data`，只从 live 的 `echo_printing` 形成历史；保留原版 history 作为展示端，TUI 本地发送日志独立维护。
+history 不消费 `message_data`。`HistoryDelivery` 从 TUI 或 WS 编辑器接收的消息提取历史内容，并为每个 history 生成独立的 `echo_printing`。字幕端的 `echo_printing` 和 `live_display_update` 仅作观察事件，不再改变历史内容和可见性。
 
-每个 history 绑定一个 live，默认 `auto`：在可用 live 中按连接顺序选择首个非隐藏的普通 live，没有时等待；已绑定 live 隐藏后暂停派发，不因瞬时隐藏切换。断开才重新选择，界面显示来源变化。显式绑定的来源离线时等待重连，不自动切换。
+默认所有历史端立即接收，每条消息每端一次；即使没有字幕端也可工作。取消 live 来源绑定及 `/history source`。未来多轨、高级历史操作在独立服务上扩展。
 
-这样多个 live 同播不会给一份 history 写入多次。需要不同字幕轨时，多个 history 分别绑定不同 live。来源关联应在 hub 路由层完成，不按消息文字猜测。
+HTTP 配置覆盖始终将 `history.message.latest_message_hide` 与 `live_display_hidden_latest_message_show` 设为 false；原始磁盘文件和 settings.html 不变。`history.hide_latest=false` 默认即时投递；设为 true 时由 ELTUI 每端暂存最新一条，在下一条消息到达时释放前一条。关闭该设置会释放暂存项，清空或断线会移除暂存项。非托管页面需要手工采用同样的显示配置。
 
 保留上游 `remove_continuous_duplicate` 的用户选择；它是连续相同内容是否展示的策略，不能拿它掩盖传输重复。测试重复传输时要关闭该展示去重。
 
@@ -329,13 +333,13 @@ history 不消费 `message_data`，只从 live 的 `echo_printing` 形成历史�
 - `/` 命令内容不作为 typing 广播；`//` 字面量文字例外。提交时取消未发心跳，随后发送具有相同 `from.uuid` 的 `message_data`。
 - 已知 1.6.6 端点禁发输入提示；已确认具备该能力的新版本可启用。外部未知版本标为“能力未知”，默认不开启专属功能，用户可在端点设置中明确启用。
 - capability 来自该连接的识别档案，不从标准 hello 猜版本。界面显示“输入心跳已发送”，没有 ACK 时不显示“观众已看到正在输入”。
-- 本地开关默认 on；显示托管页面的实际启用状态。修改需要刷新浏览器配置时，界面给出刷新提示。
+- 本地开关默认 off；确认能力后可开启。修改托管页面配置需要刷新浏览器，设置页给出提示。
 
 ## 7. 配置与运行设置
 
 - 本程序使用独立 `echolivetui.yaml`，默认位于启动工作目录；允许 `--config` 显式指定。它不经过静态服务公开。
 - 旧 `config.yaml` 仅通过显式导入迁移到新文件；保留消息、OSC、host/port 等设置并映射到分组，原文件不改。无效配置显示具体字段错误，不自动覆盖为默认值。
-- 配置分为 `input`、`listen`、`message`、`typing`、`routing`、`osc`；`input.interrupt_guard=true`、`listen.host=127.0.0.1`、`port=3000`。`/name` 对应 `message.username`；UI 分类和存储键由 `SettingSpec` 映射，不要求名称一一相同。OSC 默认关闭，地址沿用旧默认 `127.0.0.1:9000`。不从其他目录隐式读取个人配置。
+- 配置分为 `input`、`listen`、`message`、`typing`、`routing`、`history`、`log`、`osc`；`input.interrupt_guard=true`、`listen.host=127.0.0.1`、`port=3000`。`/name` 对应 `message.username`。OSC 默认关闭，地址 `127.0.0.1:9000`。默认 `log.level=error`，仅写入失败报告；不从其他目录隐式读取个人配置。
 - 监听地址与展示地址分开：`0.0.0.0`/`::` 只用于绑定，局域网 URL 使用明确设置的主机名/IP；本机 URL 始终可以使用 loopback。IPv6 地址正确加方括号。
 - 服务端端口范围 1–65535，首版不以随机端口作为端口占用的自动回退。冲突时 TUI 仍可编辑设置、保留草稿，显示实际未监听状态。
 - 改 host/port 时先验证并尝试新绑定；新绑定成功后再切换并保存，失败恢复原监听。由于同端口地址范围变更可能需要先解绑，失败时尝试重绑原地址并明确报告实际结果。
@@ -361,7 +365,7 @@ history 不消费 `message_data`，只从 live 的 `echo_printing` 形成历史�
 | 多端点 | 两 live、一 history、一 character、一 editor；各动作按目标和来源正确到达；未知角色不接收文字 |
 | 客户端识别 | 同 IP 多客户端不合并；editor 与其他 server 区分；托管版本不污染外部档案；未知/冲突/手动覆盖明确显示 |
 | 针对性适配 | 1.6.6 live 不发送 typing、1.8.12 live 可启用；history/character 不收文字；未知能力不自动启用；重连不沿用错误适配 |
-| 重复控制 | 关闭上游显示层去重后，每个 live 每帧一次、绑定 history 每次打印一次；重复发送相同文本没有被 hub 吞掉 |
+| 重复控制 | 每个 live 每帧一次，每个独立 history 每次接受消息一次；重复文本不被 hub 吞掉；字幕回报不重复写历史 |
 | 会话 | 重复 hello、editor ping 注册、同 UUID 替换、旧 socket 退出、断线重连均无幽灵条目或重播 |
 | 队列 | 慢连接隔离、满队列拒绝、长文本期间 typing/历史清空及时发送、断线和退出无遗留任务 |
 | typing | 首键、持续编辑、停键、清空、命令、多行、提交、blur、断线及目标变化；同 UUID 清理；旧版/未知能力降级 |
