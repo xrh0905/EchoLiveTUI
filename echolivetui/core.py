@@ -11,6 +11,7 @@ from .message import format_username
 from .pipeline import prepare
 from .server import Server
 from .addresses import first_ipv4, hosted_notice
+from .lan import choose_address, editor_url
 
 
 class Core:
@@ -36,6 +37,16 @@ class Core:
             candidate = await asyncio.to_thread(first_ipv4)
             host, port = self.server.address
             self.report(hosted_notice(host, port, candidate))
+        if self.server.site and self.settings["lan.enable"]:
+            try:
+                await self.server.set_lan(await asyncio.to_thread(choose_address, self.settings["lan.host"]))
+                self.report_lan()
+            except ValueError as exc:
+                self.report(str(exc))
+
+    def report_lan(self):
+        if self.server.lan_address:
+            self.report("EchoLiveTUI：远程 editor " + editor_url(*self.server.lan_address) + " · /lan 查看二维码")
 
     async def apply(self, updates, base=None):
         candidate = dict(self.settings.values)
@@ -44,20 +55,36 @@ class Core:
                 raise ValueError(f"设置冲突：{key} 已被其他操作修改；请丢弃草稿后重试")
             candidate[key] = coerce(key, value)
         self.settings.validate(candidate)
+        lan_host = await asyncio.to_thread(choose_address, candidate["lan.host"]) if candidate["lan.enable"] else None
+        if lan_host and not self.server.hosting.root:
+            raise ValueError("未识别 Echo Live 目录，无法启用远程 editor")
         old_hide_latest = self.settings["history.hide_latest"]
         old_address = self.server.address
+        old_lan = self.server.lan_address
         new_address = candidate["listen.host"], candidate["listen.port"]
         changed = old_address is not None and old_address != new_address
-        if changed:
-            await self.server.start(*new_address)
         try:
+            if changed:
+                # Remove secondary bind before moving the local bind (same-port
+                # changes can otherwise collide with the old LAN listener).
+                await self.server.set_lan(None)
+                await self.server.start(*new_address)
+            if self.server.site is None and self.server.runner is not None:
+                await self.server.start(*new_address)
+            await self.server.set_lan(lan_host)
             self.settings.save(candidate)
         except Exception:
-            if changed:
+            if self.server.address != old_address and old_address:
+                await self.server.set_lan(None)
                 await self.server.start(*old_address)
+            if self.server.site:
+                await self.server.set_lan(old_lan[0] if old_lan else None)
             raise
-        if self.server.site is None and self.server.runner is not None:
-            await self.server.start(*new_address)
+        if self.server.lan_address != old_lan:
+            if self.server.lan_address:
+                self.report_lan()
+            else:
+                self.report("EchoLiveTUI：远程发送已关闭，本机服务保持运行。")
         self.cancel_typing()
         if old_hide_latest and not self.settings["history.hide_latest"]:
             self.hub.history.flush()
@@ -110,7 +137,7 @@ class Core:
         self.last_typing = time.monotonic()
         count = self.hub.typing(format_username(self.settings.group("message")))
         unknown = any(p.profile.capabilities["typing"] is None for p in self.hub.targets())
-        self.typing_state = (f"已发 {count} 端" if count else "无支持目标") + (" · 部分未知" if unknown else "")
+        self.typing_state = (f"已发 {count} 端" if count else "无支持目标") + (" · 默认兼容" if unknown else "")
 
     async def close(self):
         self.cancel_typing()

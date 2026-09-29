@@ -150,10 +150,23 @@ class Hub:
             raise ValueError("同一连接不能更改 UUID")
         peer = await self.register(ws, envelope, ip, metadata)
         action = envelope["action"]
+        if action in {"websocket_heartbeat", "heartbeat"}:
+            # Upstream addresses heartbeats to @__ws_server; observers need a
+            # reachable target while the original sender and payload stay intact.
+            for dest in list(self.peers.values()):
+                if dest.profile.role == "server" and not dest.closed:
+                    forwarded = {**envelope, "target": dest.profile.uuid}
+                    if not dest.enqueue(forwarded, fast=True):
+                        self.log(f"写入失败：{dest.profile.name} 队列已满", "error")
+            return peer
         if envelope.get("target") == "@__ws_server":
             return peer
         if action == "message_data":
-            self.history.publish(entries_from_data(envelope.get("data", {})))
+            entries = list(entries_from_data(envelope.get("data", {})))
+            self.history.publish(entries)
+            if peer.profile.role == "server":
+                for entry in entries:
+                    self.report(f"{entry.username or peer.profile.name}：{entry.message}")
         elif action == "history_clear":
             self.history.pending.clear()
         if action == "echo_state_update":

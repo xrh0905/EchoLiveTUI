@@ -55,7 +55,7 @@ class Profile:
         if self.role in {"live", "history", "character", "client"} and action in {"broadcast_close", "websocket_close", "shutdown"}:
             return True
         if self.role == "live":
-            return action in LIVE_ACTIONS and (action != "editor_typing" or self.capabilities["typing"] is True)
+            return action in LIVE_ACTIONS and (action != "editor_typing" or self.capabilities["typing"] is not False)
         if self.role == "history":
             return action in HISTORY_ACTIONS
         if self.role == "character":

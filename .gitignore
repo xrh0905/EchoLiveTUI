@@ -7,4 +7,5 @@ build/
 *.egg-info/
 echolivetui.yaml
 .artifacts/
+echo-live-*/
 

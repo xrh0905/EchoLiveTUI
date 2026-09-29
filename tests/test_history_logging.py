@@ -88,3 +88,37 @@ def test_full_history_queue_preserves_once_and_message(tmp_path):
     with pytest.raises(ValueError, match="历史端队列已满"):
         core.submit("keep")
     assert core.paren_once
+
+
+async def test_server_message_records_tui_and_history_once_without_live(tmp_path):
+    core, history, reports = core_with_peer(tmp_path)
+    try:
+        await core.hub.receive(Socket(), {"action": "message_data", "from": {"uuid": "editor", "type": "server", "name": "Editor"}, "target": "@__live", "data": {"username": "Remote", "messages": [{"message": "Hello"}]}})
+        assert reports == ["Remote：Hello"]
+        frame, _ = history.control.get_nowait()
+        assert frame["action"] == "echo_printing"
+        assert frame["data"] == {"username": "Remote", "message": "Hello"}
+        await core.hub.receive(Socket(), {"action": "echo_printing", "from": {"uuid": "live", "type": "live"}, "data": {"username": "Remote", "message": "Hello"}})
+        assert history.control.empty()
+        assert reports == ["Remote：Hello"]
+    finally:
+        await core.close()
+
+
+@pytest.mark.parametrize("role", ["live", "history", "character", "client", "server"])
+async def test_heartbeat_retargets_all_servers_only(tmp_path, role):
+    core, history, reports = core_with_peer(tmp_path)
+    observers = [Peer(Socket(), Profile(uid, uid, "server", targeted=True)) for uid in ("observer1", "observer2")]
+    for observer in observers:
+        core.hub.peers[observer.profile.uuid] = observer
+    packet = {"action": "websocket_heartbeat", "target": "@__ws_server", "from": {"uuid": "source", "type": role, "timestamp": 123}, "data": {"state": "ready"}}
+    try:
+        await core.hub.receive(Socket(), packet)
+        for observer in observers:
+            received, _ = observer.control.get_nowait()
+            assert received == {**packet, "target": observer.profile.uuid}
+        assert history.control.empty()
+        assert reports == []
+        assert packet["target"] == "@__ws_server"
+    finally:
+        await core.close()

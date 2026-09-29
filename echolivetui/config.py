@@ -30,6 +30,8 @@ FIELDS = {
     "listen.host": Field("127.0.0.1", "监听地址"),
     "listen.port": Field(3000, "监听端口", minimum=1, maximum=65535),
     "listen.public_host": Field("", "显示地址"),
+    "lan.enable": Field(False, "局域网发送模式"),
+    "lan.host": Field("", "局域网 IPv4（留空自动选择）"),
     "message.username": Field("Someone", "说话人"),
     "message.username_brackets": Field(True, "姓名括号【】"),
     "message.quote": Field(True, "引号"),
@@ -76,6 +78,10 @@ def coerce(key: str, value):
         raise ValueError(f"{key} 可选：{', '.join(f.choices)}")
     if key in ("listen.host", "osc.host") and not value.strip():
         raise ValueError(f"{key} 不能为空")
+    if key == "lan.host" and value:
+        from .lan import valid_lan_ip
+        if not valid_lan_ip(value):
+            raise ValueError("局域网地址须为具体的非 loopback IPv4 地址")
     return value
 
 

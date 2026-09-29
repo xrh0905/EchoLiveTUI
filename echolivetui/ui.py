@@ -1,6 +1,7 @@
 """Input-first Textual screens; commands and widgets share the same core."""
 from __future__ import annotations
 import copy
+import asyncio
 from datetime import datetime
 from rich.text import Text
 from rich.cells import cell_len
@@ -16,6 +17,8 @@ from .commands import HELP, execute, parse
 from .config import FIELDS, Settings, coerce
 from .core import Core
 from .pipeline import quote_symbols
+from .lan import interfaces, editor_url, terminal_qr
+from .signals import InterruptPolicy
 
 
 class DisplayText(Static):
@@ -116,6 +119,7 @@ class SettingsScreen(ModalScreen):
                         else:
                             yield Input(str(value), id=wid, name=key, type="integer" if isinstance(field.default, int) else "text")
             yield EndpointPanel(id="endpoint-panel")
+            yield Button("局域网 editor 入口 / 二维码", id="lan-entry")
             yield Static("", id="setting-info", markup=False)
             yield Static("", id="settings-error", markup=False)
             with Horizontal(classes="actions"):
@@ -143,6 +147,7 @@ class SettingsScreen(ModalScreen):
             self.query_one("#row-field-" + key.replace(".", "-")).display = (bool(search) or belongs) and (not search or search in searchable.casefold())
         self.query_one("#fields").display = group != "endpoints"
         self.query_one("#endpoint-panel").display = group == "endpoints"
+        self.query_one("#lan-entry").display = group == "network"
         network = self.app.core.server
         host = self.app.core.settings['listen.public_host'] or self.app.core.settings['listen.host']
         hint = f"http://{host}:{self.app.core.settings['listen.port']}/live.html · 配置覆盖仅作用 HTTP 响应；浏览器刷新生效" if network.hosting.root else "当前目录未识别 Echo Live；仅提供 WS 服务。"
@@ -153,7 +158,7 @@ class SettingsScreen(ModalScreen):
         if group == "all":
             return True
         if group == "network":
-            return key.startswith("listen.")
+            return key.startswith(("listen.", "lan."))
         if group == "input":
             return key.startswith("input.") or key == "message.username"
         simulation = {"message.typewriting", "message.typewriting_scheme", "message.print_speed", "message.autopause", "message.autopausestr", "message.autopausetime"}
@@ -178,6 +183,9 @@ class SettingsScreen(ModalScreen):
     async def button(self, event):
         event.stop()
         action = event.button.id
+        if action == "lan-entry":
+            self.app.push_screen(LanScreen())
+            return
         if action == "save":
             if self.query_one("#category", Select).value == "endpoints":
                 if self.query_one(EndpointPanel).save():
@@ -275,7 +283,7 @@ class EndpointPanel(Vertical):
                 yield Select([(x, x) for x in ("auto", "live", "history", "character", "server", "unknown")], value="auto", allow_blank=False, id="role")
             with Horizontal(classes="setting-row"):
                 yield Label("输入提示能力（当前端点）")
-                yield Select([("自动/未知", "auto"), ("支持", "yes"), ("不支持", "no")], value="auto", allow_blank=False, id="typing-capability")
+                yield Select([("自动（未知按支持）", "auto"), ("支持", "yes"), ("不支持", "no")], value="auto", allow_blank=False, id="typing-capability")
             for key, label in (("software", "软件覆盖"), ("version", "版本覆盖"), ("container", "容器覆盖（如 OBS）")):
                 with Horizontal(classes="setting-row"):
                     yield Label(label)
@@ -375,6 +383,85 @@ class EndpointsScreen(ModalScreen):
         self.dismiss()
 
 
+class LanScreen(ModalScreen):
+    BINDINGS = [Binding("escape", "back", show=False)]
+
+    def compose(self):
+        with Vertical(id="dialog"):
+            yield Label("局域网发送 · 原版 Echo Live editor", classes="title")
+            with VerticalScroll(id="lan-content"):
+                yield Select([], id="lan-interface", prompt="选择当前启用的网卡")
+                yield Input(self.app.core.settings["lan.host"], id="lan-manual", placeholder="或输入本机 IPv4；留空采用所选网卡")
+                yield Static("", id="lan-state", markup=False)
+                yield Static("", id="lan-url", markup=False)
+                yield DisplayText("", id="lan-qr", markup=False)
+                yield Static("", id="lan-clients", markup=False)
+                yield Static("", id="lan-error", markup=False)
+            with Horizontal(classes="actions"):
+                yield Button("启用 / 应用", id="lan-enable", variant="primary")
+                yield Button("关闭", id="lan-disable")
+                yield Button("复制 URL", id="lan-copy")
+                yield Button("刷新网卡", id="lan-refresh")
+                yield Button("返回", id="lan-back")
+
+    async def on_mount(self):
+        await self.refresh_interfaces()
+        self.refresh_state()
+        self.set_interval(1, self.refresh_state)
+
+    async def refresh_interfaces(self):
+        available = await asyncio.to_thread(interfaces)
+        self.query_one("#lan-interface", Select).set_options([(f"{item.name} · {item.address}", item.address) for item in available])
+        configured = self.app.core.settings["lan.host"]
+        if available:
+            self.query_one("#lan-interface", Select).value = configured if configured in {i.address for i in available} else available[0].address
+
+    @on(Select.Changed, "#lan-interface")
+    def interface_selected(self, event):
+        if event.value is not Select.NULL:
+            self.query_one("#lan-manual", Input).value = str(event.value)
+
+    def refresh_state(self):
+        if not self.query("#lan-state"):
+            return
+        core = self.app.core
+        address = core.server.lan_address
+        url = editor_url(*address) if address else ""
+        self.query_one("#lan-state", Static).update("远程监听已启用；访问链接即可发送，不需要签到。" if address else "远程发送未启用。需在完整 Echo Live 目录中启动。")
+        self.query_one("#lan-url", Static).update(url)
+        qr = self.query_one("#lan-qr", Static)
+        qr.display = bool(url)
+        if getattr(self, "qr_url", None) != url:
+            qr.update(terminal_qr(url) if url else "")
+            self.qr_url = url
+        clients = [p.profile for p in core.hub.peers.values() if p.profile.role == "server"]
+        self.query_one("#lan-clients", Static).update("已连接发送端：" + ("；".join(f"{p.name} · {p.ip}" for p in clients) or "无"))
+
+    @on(Button.Pressed)
+    async def button(self, event):
+        event.stop()
+        action = event.button.id
+        try:
+            if action == "lan-enable":
+                await self.app.core.apply({"lan.enable": True, "lan.host": self.query_one("#lan-manual", Input).value.strip()})
+            elif action == "lan-disable":
+                await self.app.core.apply({"lan.enable": False})
+            elif action == "lan-copy" and self.app.core.server.lan_address:
+                self.app.copy_to_clipboard(editor_url(*self.app.core.server.lan_address))
+            elif action == "lan-refresh":
+                await self.refresh_interfaces()
+            elif action == "lan-back":
+                self.dismiss()
+                return
+            self.query_one("#lan-error", Static).update("")
+        except (ValueError, OSError) as exc:
+            self.query_one("#lan-error", Static).update(str(exc))
+        self.refresh_state()
+
+    def action_back(self):
+        self.dismiss()
+
+
 class EchoApp(App, inherit_bindings=False):
     TITLE = "EchoLiveTUI"
     ENABLE_COMMAND_PALETTE = False
@@ -404,6 +491,11 @@ class EchoApp(App, inherit_bindings=False):
     #fields, #endpoint-controls { height: 1fr; }
     #endpoint-panel { height: 1fr; }
     #endpoint-refresh { height: 3; }
+    #lan-entry { height: 3; }
+    #lan-content { height: 1fr; }
+    #lan-state, #lan-url, #lan-clients, #lan-error { height: auto; margin-bottom: 1; }
+    #lan-error { color: #ffaaa0; }
+    #lan-qr { width: auto; height: auto; background: white; color: black; margin: 1 0; }
     .quote-pair { width: 1fr; height: 3; }
     .quote-pair Input { width: 1fr; }
     .quote-pair Input:first-child { margin-right: 1; }
@@ -454,11 +546,15 @@ class EchoApp(App, inherit_bindings=False):
         yield DisplayText("", id="enhancements", markup=False)
         with Horizontal(id="footer"):
             yield DisplayText("", id="hints", markup=False)
-            yield ActionLink("settings", name="settings", id="settings-link")
-            yield ActionLink("endpoints", name="endpoints", id="endpoints-link")
+            yield ActionLink("配对", name="lan", id="pair-link")
+            yield ActionLink("设置", name="settings", id="settings-link")
+            yield ActionLink("端点", name="endpoints", id="endpoints-link")
+            yield ActionLink("退出", name="quit", id="exit-link")
 
     async def on_mount(self):
         self.query_one("#error").display = False
+        loop = asyncio.get_running_loop()
+        self.interrupt_policy = InterruptPolicy(self.core.settings, lambda: loop.call_soon_threadsafe(self.exit)).install()
         self.query_one("#suggestions").display = False
         self.query_one("#entry").focus()
         if self.start_server:
@@ -561,11 +657,13 @@ class EchoApp(App, inherit_bindings=False):
         if name == "quit":
             self.exit()
         elif name == "settings":
-            self.push_screen(SettingsScreen("endpoints" if args and args[0] == "routing" else args[0] if args else "input"), self.return_focus)
+            self.push_screen(LanScreen() if args and args[0] == "lan" else SettingsScreen("endpoints" if args and args[0] == "routing" else args[0] if args else "input"), self.return_focus)
         elif name == "endpoints":
             self.push_screen(EndpointsScreen(), self.return_focus)
         elif name == "compose":
             self.push_screen(ComposeScreen(), self.return_focus)
+        elif name == "lan":
+            self.push_screen(LanScreen(), self.return_focus)
 
     def return_focus(self, _=None):
         self.query_one("#entry").focus()
@@ -593,4 +691,6 @@ class EchoApp(App, inherit_bindings=False):
             self.exit()
 
     async def on_unmount(self):
+        if hasattr(self, "interrupt_policy"):
+            self.interrupt_policy.restore()
         await self.core.close()

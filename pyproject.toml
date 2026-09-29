@@ -4,13 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "echolivetui"
-version = "0.1.0"
+version = "0.2.0"
 description = "Input-first terminal broadcaster for Echo Live"
 requires-python = ">=3.12"
-dependencies = ["textual>=8.2,<9", "aiohttp>=3.11,<4", "PyYAML>=6,<7", "jieba>=0.42", "markdown-it-py>=3,<5", "pypinyin>=0.55,<1", "python-osc>=1.9,<2"]
+dependencies = ["textual>=8.2,<9", "aiohttp>=3.11,<4", "PyYAML>=6,<7", "jieba>=0.42", "markdown-it-py>=3,<5", "pypinyin>=0.55,<1", "python-osc>=1.9,<2", "psutil>=7,<9", "qrcode>=8,<9"]
 
 [project.optional-dependencies]
 test = ["pytest>=8", "pytest-asyncio>=0.25"]
+build = ["Nuitka==4.2.2", "zstandard>=0.23", "ordered-set>=4"]
 
 [project.scripts]
 echolivetui = "echolivetui.__main__:main"
