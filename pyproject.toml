@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "echolivetui"
+version = "0.1.0"
+description = "Input-first terminal broadcaster for Echo Live"
+requires-python = ">=3.12"
+dependencies = ["textual>=8.2,<9", "aiohttp>=3.11,<4", "PyYAML>=6,<7", "jieba>=0.42", "markdown-it-py>=3,<5", "pypinyin>=0.55,<1", "python-osc>=1.9,<2"]
+
+[project.optional-dependencies]
+test = ["pytest>=8", "pytest-asyncio>=0.25"]
+
+[project.scripts]
+echolivetui = "echolivetui.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["echolivetui*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
