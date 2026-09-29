@@ -1,0 +1,30 @@
+{
+  "checked_on": "2026-09-30",
+  "target": "https://github.com/xrh0905/EchoLiveTUI",
+  "upstream": {
+    "repository": "https://github.com/sheep-realms/Echo-Live",
+    "local_checkout": ".reference/Echo-Live",
+    "base": {
+      "tag": "1.6.6",
+      "commit": "0139ab2a28b8b565a62e78792f32311403b9f7e6"
+    },
+    "latest_stable": {
+      "tag": "1.8.12",
+      "commit": "44ff7288e5c3d9dc218947e01220b94fb2f6d6b7",
+      "published_at": "2026-09-16T08:54:07Z"
+    },
+    "master_at_check": "44ff7288e5c3d9dc218947e01220b94fb2f6d6b7"
+  },
+  "legacy_client": {
+    "repository": "https://github.com/xrh0905/echo-client",
+    "local_checkout": "W:/echo-client",
+    "commit": "deb2f07d3dc1e422c495966e912be9fea3a8ed78",
+    "package_version": "0.0.12"
+  },
+  "references": [
+    "https://chatgpt.com/share/6abbee5e-81b0-83e9-96b8-5ca184af8179",
+    "https://sheep-realms.github.io/Echo-Live-Doc/dev/echo/",
+    "https://sheep-realms.github.io/Echo-Live-Doc/dev/broadcast/",
+    "https://sheep-realms.github.io/Echo-Live-Doc/dev/broadcast/api/"
+  ]
+}
