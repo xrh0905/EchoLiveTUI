@@ -10,6 +10,7 @@ from .hub import Hub
 from .message import format_username
 from .pipeline import prepare
 from .server import Server
+from .addresses import first_ipv4, hosted_notice
 
 
 class Core:
@@ -31,6 +32,10 @@ class Core:
             self.report(str(exc))
         if self.settings.load_error:
             self.report(f"配置无效，使用默认值且禁止覆盖：{self.settings.load_error}")
+        if self.server.site and self.server.hosting.root:
+            candidate = await asyncio.to_thread(first_ipv4)
+            host, port = self.server.address
+            self.report(hosted_notice(host, port, candidate))
 
     async def apply(self, updates, base=None):
         candidate = dict(self.settings.values)

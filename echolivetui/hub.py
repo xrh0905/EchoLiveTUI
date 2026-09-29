@@ -18,6 +18,7 @@ class Peer:
     wake: asyncio.Event = field(default_factory=asyncio.Event)
     worker: asyncio.Task | None = None
     closed: bool = False
+    closing: bool = False
     observed: Profile | None = None
 
     def enqueue(self, envelope, delay=0, fast=False):
@@ -58,6 +59,9 @@ class Peer:
             self.closed = True
 
     async def close(self):
+        if self.closing:
+            return
+        self.closing = True
         self.closed = True
         if self.worker:
             self.worker.cancel()
@@ -90,13 +94,17 @@ class Hub:
         return [p for p in self.peers.values() if p.profile.role == "live" and not p.closed and (any(target_matches(t, p.profile) for t in selected) if selected else True) and not any(target_matches(t, p.profile, targeted=False) for t in excluded)]
 
     async def register(self, ws, envelope, ip="", metadata=None):
+        if getattr(ws, "_eltui_retired", False):
+            raise ValueError("已替换的旧连接不能重新登记")
         uid = envelope["from"]["uuid"]
         existing = self.peers.get(uid)
+        replaced = None
         if existing and existing.ws is ws:
             peer = existing
         else:
             if existing:
-                await existing.close()
+                setattr(existing.ws, "_eltui_retired", True)
+                replaced = existing
             peer = Peer(ws, Profile(uid, ip=ip))
             self.peers[uid] = peer
             peer.worker = asyncio.create_task(peer.write_loop(self.log))
@@ -106,6 +114,8 @@ class Hub:
         peer.profile.identify(envelope, **(metadata or {}))
         peer.observed = copy.deepcopy(peer.profile)
         self.apply_override(peer)
+        if replaced:
+            await replaced.close()
         return peer
 
     def apply_override(self, peer):

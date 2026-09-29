@@ -101,3 +101,54 @@ async def test_history_mouse_selection_keeps_input_focus(tmp_path):
         assert app.focused is entry and len(app.screen_stack) == 1
         await pilot.press("tab")
         assert app.focused is entry
+
+
+async def test_footer_links_and_embedded_endpoints(tmp_path):
+    from echolivetui.ui import EndpointsScreen, EndpointPanel
+    app = EchoApp(Settings(tmp_path / "s.yaml"), tmp_path, start_server=False)
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.click("#settings-link")
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, SettingsScreen)
+        screen.query_one("#category", Select).value = "endpoints"
+        await pilot.pause()
+        assert app.screen is screen and screen.query_one(EndpointPanel).display
+        screen.query_one("#category", Select).value = "formatting"
+        await pilot.pause()
+        left = screen.query_one("#field-message-quote_open", Input)
+        right = screen.query_one("#field-message-quote_close", Input)
+        assert left.region.y == right.region.y
+        assert left.region.right <= right.region.x
+        await pilot.press("escape")
+        await pilot.click("#endpoints-link")
+        await pilot.pause()
+        assert isinstance(app.screen, EndpointsScreen)
+
+
+async def test_banner_is_excluded_from_history_selection(tmp_path):
+    app = EchoApp(Settings(tmp_path / "s.yaml"), tmp_path, start_server=False)
+    async with app.run_test() as pilot:
+        app.query_one("#log", RichLog).write("only history selected")
+        await pilot.pause()
+        await pilot.mouse_down("#log", offset=(20, 0))
+        await pilot.hover("#top", offset=(0, 0))
+        await pilot.mouse_up("#top", offset=(0, 0))
+        await pilot.pause()
+        selected = app.screen.get_selected_text()
+        assert "EchoLiveTUI" not in selected
+        assert "发送到" not in selected
+        assert "only history" in selected
+
+
+async def test_narrow_settings_keeps_switch_and_buttons_visible(tmp_path):
+    app = EchoApp(Settings(tmp_path / "s.yaml"), tmp_path, start_server=False)
+    async with app.run_test(size=(56, 24)) as pilot:
+        app.open_screen("settings", ["history"])
+        await pilot.pause()
+        control = app.screen.query_one("#field-history-hide_latest", Select)
+        fields = app.screen.query_one("#fields")
+        save = app.screen.query_one("#save")
+        assert fields.region.height >= 5
+        assert control.region.bottom <= fields.region.bottom
+        assert save.region.bottom <= 24

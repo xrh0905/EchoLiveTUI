@@ -10,7 +10,7 @@ HELP = {
     "set": "/set key value — 修改并保存设置",
     "name": "/name [名字] — 设置或查看说话人",
     "quote": "/quote [on|off|en|cn|jp|custom] — 引号开关/样式",
-    "paren": "/paren [once|on|off] — 下一条或持续使用括号",
+    "paren": "/paren [once|on|off] — 下一条或持续给用户名加【】",
     "endpoints": "/endpoints — 客户端识别、目标与历史来源",
     "target": "/target all|reset|set 选择器...|exclude 选择器...",
     "history": "/history clear — 清空独立历史记录",
@@ -108,10 +108,10 @@ async def execute(core, command):
         if args == ["once"]:
             core.paren_once = True
         elif args:
-            await core.apply({"message.paren": args[0] == "on"})
+            await core.apply({"message.username_brackets": args[0] == "on"})
             core.paren_once = False
         else:
-            core.report("括号：" + ("仅下一条" if core.paren_once else str(settings["message.paren"])))
+            core.report("姓名框【】：" + ("仅下一条" if core.paren_once else "开" if settings["message.username_brackets"] else "关"))
     elif name == "nocc":
         await core.apply({"input.interrupt_guard": args[0] == "on" if args else not settings["input.interrupt_guard"]})
     elif name == "target":

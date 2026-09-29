@@ -16,20 +16,22 @@ python -m venv .venv
 
 在 Echo Live 目录中运行会自动托管当前目录，OBS 使用 `http://127.0.0.1:3000/live.html`，历史页使用 `/history.html`。只覆盖 HTTP 返回的 `config.js`，磁盘文件不变；网页 `settings.html` 获得原配置。其他目录只启动 WS 服务，不扫描或管理安装目录。
 
+托管启动成功时，主屏历史区会出现来自 EchoLiveTUI 的入口消息，链接带实际端口及 `/live.html?name=main`。仅显示监听范围内的本机地址和首个有效 IPv4 地址，不显示不可用候选；editor 远程入口留到阶段 1.5。
+
 ## 常用操作
 
 - 输入文字并按 Enter；`//settings` 发送字面量 `/settings`。
-- `/settings` 打开设置；`/settings log` 调整日志；`/settings history` 调整 ELTUI 历史策略。
+- `/settings` 打开设置；`/settings log` 调整日志；`/settings history` 调整 EchoLiveTUI 历史策略。
 - `/name 名字`、`/quote [on|off|en|cn|jp|custom]`、`/paren once|on|off`。
 - `/endpoints` 查看客户端档案及能力覆盖；`/target set UUID或@名称`、`/target exclude ...`、`/target all`。
 - `/compose` 编辑多行消息；多行粘贴也会打开此页，不执行粘贴的命令。
 - `/history clear` 清空历史端；`/help` 查看完整命令；`/quit` 退出。
 
-默认发送给所有在线字幕端，包括仅接收定向广播的字幕端。历史端独立从已接受消息生成记录，不依赖字幕端打印回报；只有历史端在线也可发送。托管配置关闭上游“隐藏最新一条”，默认立即显示历史；可选择由 ELTUI 暂存最新一条，直到下一条消息到达。非托管页面需手动关闭 `history.message.latest_message_hide` 和 `live_display_hidden_latest_message_show`。
+默认发送给所有在线字幕端，包括仅接收定向广播的字幕端。历史端独立从已接受消息生成记录，不依赖字幕端打印回报；只有历史端在线也可发送。托管配置关闭上游“隐藏最新一条”，默认立即显示历史；可选择由 EchoLiveTUI 暂存最新一条，直到下一条消息到达。非托管页面需手动关闭 `history.message.latest_message_hide` 和 `live_display_hidden_latest_message_show`。
 
 默认日志级别 `error`，只报告写入失败，不逐端输出成功或连接日志；主屏保留用户消息记录。`info` 显示连接、接受和写入结果，`debug` 额外显示无效协议消息。框选历史后可用 Ctrl+C 复制，未选中文字时 Ctrl+C 默认不退出。窗口标题栏、状态栏和历史区均不夺取输入焦点。
 
-独立 WS 使用时，页面应只经 WS 发送：启用 WS，设置对应地址，并设置 `editor.websocket.disable_broadcast=true`。混合使用独立 BroadcastChannel 仍可能绕过 ELTUI 的去重边界。未知客户端版本不会自动获得 typing 能力，可在端点页手动指定。
+独立 WS 使用时，页面应只经 WS 发送：启用 WS，设置对应地址，并设置 `editor.websocket.disable_broadcast=true`。混合使用独立 BroadcastChannel 仍可能绕过 EchoLiveTUI 的去重边界。未知客户端版本不会自动获得 typing 能力，可在端点页手动指定。
 
 - [第一版设计](docs/v1-design.md)：范围、界面、广播路由、端点设置、按当前目录托管、配置响应覆盖、实施与验收。
 - [1.6.6 → 1.8.12 差异和适配缺口](docs/upstream-compatibility.md)：源码结论、旧客户端缺陷、优先级和证据。
@@ -79,7 +81,7 @@ node scripts/probe-upstream.cjs
 
 命令采用新规范：`//` 发送以 `/` 开头的文字，`/settings` 打开可搜索、分组、校验并保存各项功能的 TUI 设置页；`/set` 提供统一快捷修改。`/name` 保留为正式命令，仅保留 `/nocc`、`/clear`、`/exit` 等明确列出的兼容入口，不兼容整套旧命令。
 
-直播高频操作保留 `/quote` 引号切换与 `/paren once|on|off` 括号控制。顶栏集中展示连接与目标，输入框附近展示说话人，底栏展示下一条消息的增强设置和上下文操作提示。
+`/paren once|on|off` 只控制用户名两侧的 `【】`，不修改消息正文；正文引号由 `/quote` 控制。左右自定义引号在设置页同排编辑。底栏的 `settings` / `endpoints` 可点击打开对应窗口；在设置页切换端点分类不会另开窗口。顶部两行 banner 不参与历史文本框选。
 
 ## 阶段 1.5
 

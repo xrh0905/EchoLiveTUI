@@ -31,12 +31,11 @@ FIELDS = {
     "listen.port": Field(3000, "监听端口", minimum=1, maximum=65535),
     "listen.public_host": Field("", "显示地址"),
     "message.username": Field("Someone", "说话人"),
-    "message.username_brackets": Field(True, "说话人方括号"),
+    "message.username_brackets": Field(True, "姓名括号【】"),
     "message.quote": Field(True, "引号"),
     "message.quote_style": Field("en", "引号样式", ("en", "cn", "jp", "custom")),
     "message.quote_open": Field("", "自定义左引号"),
     "message.quote_close": Field("", "自定义右引号"),
-    "message.paren": Field(False, "括号"),
     "message.suffix": Field(False, "后缀"),
     "message.suffix_value": Field("喵", "后缀内容"),
     "message.typewriting": Field(True, "模拟打字"),
@@ -47,7 +46,7 @@ FIELDS = {
     "message.autopausetime": Field(10, "停顿时长", minimum=0, maximum=60000),
     "typing.enable": Field(False, "输入提示"),
     "log.level": Field("error", "日志级别", ("error", "info", "debug")),
-    "history.hide_latest": Field(False, "ELTUI 暂存最新一条历史"),
+    "history.hide_latest": Field(False, "暂存最新一条历史"),
     "osc.enable": Field(False, "VRChat OSC"),
     "osc.host": Field("127.0.0.1", "OSC 地址"),
     "osc.port": Field(9000, "OSC 端口", minimum=1, maximum=65535),
@@ -103,6 +102,10 @@ class Settings:
                     if not isinstance(entries, dict):
                         raise ValueError(f"{group} 必须为映射")
                     for key, value in entries.items():
+                        if group == "message" and key == "paren":
+                            # Removed prototype-only body parentheses; username_brackets
+                            # remains the sole persistent setting for /paren.
+                            continue
                         self.values[f"{group}.{key}"] = coerce(f"{group}.{key}", value)
                 self.validate(self.values)
                 self.validate_routing(self.routing)

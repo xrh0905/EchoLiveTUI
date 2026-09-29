@@ -47,10 +47,14 @@ async def main():
                 # Upstream intentionally hides the newest history row by default.
                 history = await pages[2].locator("#echo-live-history-message-list").text_content()
                 assert history.count("TUI") == 1, history
+                assert "TUI" in await pages[2].locator("#echo-live-history-message-list").inner_text()
+                assert await pages[2].evaluate("config.history.message.latest_message_hide") is False
+                assert await pages[0].evaluate("echo.printSpeedStart") == settings["message.print_speed"]
                 assert await pages[0].evaluate("config.editor.websocket.disable_broadcast") is True
                 assert not failures, failures
                 assert not errors, errors
                 print(f"PASS {core.server.hosting.version}: two live pages, one history entry, no missing resources or page errors", flush=True)
+                await context.close()
                 await browser.close()
         finally:
             await core.close()

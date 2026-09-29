@@ -27,8 +27,8 @@ def prepare(text, settings, paren_once=False):
     if settings["message.quote"]:
         left, right = quote_symbols(settings)
         modified = left + modified + right
-    if settings["message.paren"] or paren_once:
-        modified = "（" + modified + "）"
     cfg = settings.group("message")
+    if paren_once:
+        cfg["username_brackets"] = True
     parsed = apply_autopause(cfg, parse_message(modified))
     return Prepared(text, "".join(x.get("text", "") for x in parsed), json.loads(render(cfg, parsed))["data"], get_delay(cfg, parsed) / 1000)

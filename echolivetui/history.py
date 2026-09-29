@@ -1,4 +1,4 @@
-"""Independent history delivery, owned by ELTUI rather than live playback ACKs."""
+"""Independent history delivery, owned by EchoLiveTUI rather than live playback ACKs."""
 from dataclasses import dataclass
 
 

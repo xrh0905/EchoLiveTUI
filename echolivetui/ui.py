@@ -18,6 +18,24 @@ from .core import Core
 from .pipeline import quote_symbols
 
 
+class DisplayText(Static):
+    ALLOW_SELECT = False
+
+    def get_selection(self, selection):
+        # Textual may include the drag end widget even with ALLOW_SELECT=False.
+        return None
+
+    @property
+    def text_selection(self):
+        return None
+
+
+class ActionLink(DisplayText, can_focus=False):
+    def on_click(self, event):
+        event.stop()
+        self.app.open_screen(self.name)
+
+
 class HistoryLog(RichLog, can_focus=False):
     """Wrapped, mouse-selectable records which never take keyboard focus."""
     def get_selection(self, selection):
@@ -79,18 +97,25 @@ class SettingsScreen(ModalScreen):
                 yield Input(placeholder="搜索名称或设置键", id="search")
             with VerticalScroll(id="fields"):
                 for key, field in FIELDS.items():
+                    if key == "message.quote_close":
+                        continue
                     value = app.settings_draft[key]
                     wid = "field-" + key.replace(".", "-")
                     with Horizontal(classes="setting-row", id="row-" + wid):
-                        label = Label(field.label)
+                        label = Label("自定义引号（左 / 右）" if key == "message.quote_open" else field.label)
                         label.tooltip = f"{key}\n默认：{field.default}\n{field.effect(key)}"
                         yield label
-                        if isinstance(field.default, bool):
+                        if key == "message.quote_open":
+                            with Horizontal(classes="quote-pair"):
+                                yield Input(str(value), id=wid, name=key, placeholder="左引号")
+                                yield Input(str(app.settings_draft["message.quote_close"]), id="field-message-quote_close", name="message.quote_close", placeholder="右引号")
+                        elif isinstance(field.default, bool):
                             yield Select([("关闭", False), ("开启", True)], value=value, allow_blank=False, id=wid, name=key)
                         elif field.choices:
                             yield Select([(x, x) for x in field.choices], value=value, allow_blank=False, id=wid, name=key)
                         else:
                             yield Input(str(value), id=wid, name=key, type="integer" if isinstance(field.default, int) else "text")
+            yield EndpointPanel(id="endpoint-panel")
             yield Static("", id="setting-info", markup=False)
             yield Static("", id="settings-error", markup=False)
             with Horizontal(classes="actions"):
@@ -111,8 +136,13 @@ class SettingsScreen(ModalScreen):
         group = self.query_one("#category", Select).value
         search = self.query_one("#search", Input).value.casefold()
         for key, field in FIELDS.items():
+            if key == "message.quote_close":
+                continue
             belongs = self.belongs(key, group)
-            self.query_one("#row-field-" + key.replace(".", "-")).display = (bool(search) or belongs) and (not search or search in (key + field.label).casefold())
+            searchable = key + field.label + ("message.quote_close 自定义右引号" if key == "message.quote_open" else "")
+            self.query_one("#row-field-" + key.replace(".", "-")).display = (bool(search) or belongs) and (not search or search in searchable.casefold())
+        self.query_one("#fields").display = group != "endpoints"
+        self.query_one("#endpoint-panel").display = group == "endpoints"
         network = self.app.core.server
         host = self.app.core.settings['listen.public_host'] or self.app.core.settings['listen.host']
         hint = f"http://{host}:{self.app.core.settings['listen.port']}/live.html · 配置覆盖仅作用 HTTP 响应；浏览器刷新生效" if network.hosting.root else "当前目录未识别 Echo Live；仅提供 WS 服务。"
@@ -140,10 +170,6 @@ class SettingsScreen(ModalScreen):
         event.stop()
         widget = event.control
         if widget.id in {"search", "category"}:
-            if widget.id == "category" and event.value == "endpoints":
-                self.dismiss()
-                self.app.call_after_refresh(self.app.open_screen, "endpoints")
-                return
             self.filter_fields()
         elif widget.name in FIELDS:
             self.app.settings_draft[widget.name] = event.value
@@ -153,6 +179,10 @@ class SettingsScreen(ModalScreen):
         event.stop()
         action = event.button.id
         if action == "save":
+            if self.query_one("#category", Select).value == "endpoints":
+                if self.query_one(EndpointPanel).save():
+                    self.query_one("#settings-error", Static).update("端点设置已保存")
+                return
             try:
                 updates = {k: coerce(k, v) for k, v in self.app.settings_draft.items() if coerce(k, v) != self.app.settings_base[k]}
                 await self.app.core.apply(updates, self.app.settings_base)
@@ -162,6 +192,11 @@ class SettingsScreen(ModalScreen):
             self.app.settings_draft = None
             self.dismiss()
         elif action in {"reset", "discard", "reload"}:
+            if self.query_one("#category", Select).value == "endpoints":
+                panel = self.query_one(EndpointPanel)
+                panel.query_one("#targets", Input).value = "" if action == "reset" else " ".join(self.app.core.settings.routing["targets"])
+                panel.query_one("#exclude", Input).value = "" if action == "reset" else " ".join(self.app.core.settings.routing["exclude"])
+                return
             values = dict(self.app.settings_draft)
             if action == "reset":
                 group = self.query_one("#category", Select).value
@@ -224,38 +259,31 @@ class ComposeScreen(ModalScreen):
         self.dismiss()
 
 
-class EndpointsScreen(ModalScreen):
-    BINDINGS = [Binding("escape", "back", show=False)]
-
+class EndpointPanel(Vertical):
     def compose(self):
-        with Vertical(id="dialog"):
-            yield Label("端点 · 每个连接独立识别", classes="title")
-            yield Select([], id="peer", prompt="选择客户端")
-            yield Static("", id="peer-detail", markup=False)
-            with VerticalScroll(id="endpoint-controls"):
+        yield Select([], id="peer", prompt="选择客户端")
+        yield Static("", id="peer-detail", markup=False)
+        with VerticalScroll(id="endpoint-controls"):
+            with Horizontal(classes="setting-row"):
+                yield Label("定向目标（空格分隔 UUID 或 @名称）")
+                yield Input(" ".join(self.app.core.settings.routing["targets"]), id="targets")
+            with Horizontal(classes="setting-row"):
+                yield Label("排除目标")
+                yield Input(" ".join(self.app.core.settings.routing["exclude"]), id="exclude")
+            with Horizontal(classes="setting-row"):
+                yield Label("手动职责（当前端点）")
+                yield Select([(x, x) for x in ("auto", "live", "history", "character", "server", "unknown")], value="auto", allow_blank=False, id="role")
+            with Horizontal(classes="setting-row"):
+                yield Label("输入提示能力（当前端点）")
+                yield Select([("自动/未知", "auto"), ("支持", "yes"), ("不支持", "no")], value="auto", allow_blank=False, id="typing-capability")
+            for key, label in (("software", "软件覆盖"), ("version", "版本覆盖"), ("container", "容器覆盖（如 OBS）")):
                 with Horizontal(classes="setting-row"):
-                    yield Label("定向目标（空格分隔 UUID 或 @名称）")
-                    yield Input(" ".join(self.app.core.settings.routing["targets"]), id="targets")
-                with Horizontal(classes="setting-row"):
-                    yield Label("排除目标")
-                    yield Input(" ".join(self.app.core.settings.routing["exclude"]), id="exclude")
-                with Horizontal(classes="setting-row"):
-                    yield Label("手动职责（当前端点）")
-                    yield Select([(x, x) for x in ("auto", "live", "history", "character", "server", "unknown")], value="auto", allow_blank=False, id="role")
-                with Horizontal(classes="setting-row"):
-                    yield Label("输入提示能力（当前端点）")
-                    yield Select([("自动/未知", "auto"), ("支持", "yes"), ("不支持", "no")], value="auto", allow_blank=False, id="typing-capability")
-                for key, label in (("software", "软件覆盖"), ("version", "版本覆盖"), ("container", "容器覆盖（如 OBS）")):
-                    with Horizontal(classes="setting-row"):
-                        yield Label(label)
-                        yield Input(placeholder="留空使用识别结果", id="profile-" + key)
-                yield Checkbox("按唯一名称保存覆盖（否则仅当前 UUID）", id="persist-name")
-                yield Static("历史端独立接收已接受的消息，不依赖字幕端回报。显示策略见 /settings history。", markup=False)
-            yield Static("", id="endpoint-error", markup=False)
-            with Horizontal(classes="actions"):
-                yield Button("保存", id="save", variant="primary")
-                yield Button("刷新列表", id="refresh")
-                yield Button("返回", id="back")
+                    yield Label(label)
+                    yield Input(placeholder="留空使用识别结果", id="profile-" + key)
+            yield Checkbox("按唯一名称保存覆盖（否则仅当前 UUID）", id="persist-name")
+            yield Static("历史端独立接收已接受的消息，不依赖字幕端回报。显示策略见 /settings history。", markup=False)
+        yield Static("", id="endpoint-error", markup=False)
+        yield Button("刷新列表", id="endpoint-refresh")
 
     def on_mount(self):
         self.refresh_peers()
@@ -279,50 +307,69 @@ class EndpointsScreen(ModalScreen):
         for key in ("software", "version", "container"):
             self.query_one("#profile-" + key, Input).value = override.get(key, "")
 
+    @on(Button.Pressed, "#endpoint-refresh")
+    def refresh_button(self, event):
+        event.stop()
+        self.refresh_peers()
+
+    def save(self):
+        core = self.app.core
+        routing = copy.deepcopy(core.settings.routing)
+        try:
+            for key in ("targets", "exclude"):
+                selectors = self.query_one("#" + key, Input).value.split()
+                for selector in selectors:
+                    if selector != "@__live":
+                        core.hub.resolve(selector, "live")
+                routing[key] = selectors
+            uid = self.query_one("#peer", Select).value
+            peer = core.hub.peers.get(uid)
+            if peer:
+                persistent = self.query_one("#persist-name", Checkbox).value
+                selector = "@" + peer.profile.name if persistent else uid
+                if persistent:
+                    core.hub.resolve(selector)
+                role = self.query_one("#role", Select).value
+                typing = self.query_one("#typing-capability", Select).value
+                override = {}
+                if role != "auto":
+                    override["role"] = role
+                if typing != "auto":
+                    override["typing"] = typing == "yes"
+                for key in ("software", "version", "container"):
+                    value = self.query_one("#profile-" + key, Input).value.strip()
+                    if value:
+                        override[key] = value
+                routing["overrides"].pop(uid, None)
+                routing["overrides"].pop("@" + peer.profile.name, None)
+                routing["overrides"][selector] = override
+            core.settings.save(routing=routing)
+            if peer:
+                core.hub.apply_override(peer)
+            return True
+        except (ValueError, OSError) as exc:
+            self.query_one("#endpoint-error", Static).update(str(exc))
+
+        return False
+
+class EndpointsScreen(ModalScreen):
+    BINDINGS = [Binding("escape", "back", show=False)]
+
+    def compose(self):
+        with Vertical(id="dialog"):
+            yield Label("端点 · 每个连接独立识别", classes="title")
+            yield EndpointPanel(id="endpoint-panel")
+            with Horizontal(classes="actions"):
+                yield Button("保存", id="save", variant="primary")
+                yield Button("返回", id="back")
+
     @on(Button.Pressed)
     def button(self, event):
-        action = event.button.id
-        if action == "back":
+        event.stop()
+        if event.button.id == "back":
             self.dismiss()
-        elif action == "refresh":
-            self.refresh_peers()
-        elif action == "save":
-            core = self.app.core
-            routing = copy.deepcopy(core.settings.routing)
-            try:
-                for key in ("targets", "exclude"):
-                    selectors = self.query_one("#" + key, Input).value.split()
-                    for selector in selectors:
-                        if selector != "@__live":
-                            core.hub.resolve(selector, "live")
-                    routing[key] = selectors
-                uid = self.query_one("#peer", Select).value
-                peer = core.hub.peers.get(uid)
-                if peer:
-                    persistent = self.query_one("#persist-name", Checkbox).value
-                    selector = "@" + peer.profile.name if persistent else uid
-                    if persistent:
-                        core.hub.resolve(selector)
-                    role = self.query_one("#role", Select).value
-                    typing = self.query_one("#typing-capability", Select).value
-                    override = {}
-                    if role != "auto":
-                        override["role"] = role
-                    if typing != "auto":
-                        override["typing"] = typing == "yes"
-                    for key in ("software", "version", "container"):
-                        value = self.query_one("#profile-" + key, Input).value.strip()
-                        if value:
-                            override[key] = value
-                    routing["overrides"].pop(uid, None)
-                    routing["overrides"].pop("@" + peer.profile.name, None)
-                    routing["overrides"][selector] = override
-                core.settings.save(routing=routing)
-                if peer:
-                    core.hub.apply_override(peer)
-                self.dismiss()
-            except (ValueError, OSError) as exc:
-                self.query_one("#endpoint-error", Static).update(str(exc))
+        elif event.button.id == "save" and self.query_one(EndpointPanel).save():
+            self.dismiss()
 
     def action_back(self):
         self.dismiss()
@@ -342,6 +389,10 @@ class EchoApp(App, inherit_bindings=False):
     #context { color: #9eaeb9; }
     #enhancements { color: #e6c18e; }
     #hints { color: #91a7b9; background: #192b37; }
+    #footer { height: 1; background: #192b37; }
+    #footer #hints { width: 1fr; }
+    ActionLink { width: auto; height: 1; margin-right: 1; color: #95e4d0; text-style: underline; }
+    ActionLink:hover { background: #3f827b; }
     #error { height: auto; max-height: 2; color: #ffaaa0; padding: 0 1; }
     #suggestions { height: auto; max-height: 3; padding: 0 1; color: #95e4d0; }
     ModalScreen { align: center middle; background: #000000 65%; }
@@ -351,15 +402,24 @@ class EchoApp(App, inherit_bindings=False):
     .filters Select { width: 20; }
     .filters Input { width: 1fr; }
     #fields, #endpoint-controls { height: 1fr; }
+    #endpoint-panel { height: 1fr; }
+    #endpoint-refresh { height: 3; }
+    .quote-pair { width: 1fr; height: 3; }
+    .quote-pair Input { width: 1fr; }
+    .quote-pair Input:first-child { margin-right: 1; }
     .setting-row { height: 4; padding-bottom: 1; }
     .setting-row Label { width: 38%; height: 3; content-align: left middle; padding-right: 1; }
     .setting-row Input, .setting-row Select { width: 1fr; }
     .setting-row Checkbox { width: 1fr; border: none; }
-    SettingsScreen.narrow .filters { layout: vertical; height: 7; }
-    SettingsScreen.narrow .filters Select, SettingsScreen.narrow .filters Input { width: 100%; }
-    SettingsScreen.narrow .setting-row { layout: vertical; height: 6; }
-    SettingsScreen.narrow .setting-row Label { width: 100%; height: 2; }
+    SettingsScreen.narrow #dialog { width: 100%; height: 100%; padding: 0 1; }
+    SettingsScreen.narrow .filters { height: 4; }
+    SettingsScreen.narrow .filters Select { width: 16; }
+    SettingsScreen.narrow .filters Input { width: 1fr; }
+    SettingsScreen.narrow .setting-row { layout: vertical; height: 5; }
+    SettingsScreen.narrow .setting-row Label { width: 100%; height: 1; }
     SettingsScreen.narrow .setting-row Input, SettingsScreen.narrow .setting-row Select { width: 100%; }
+    SettingsScreen.narrow .quote-pair { width: 100%; }
+    SettingsScreen.narrow .quote-pair Input { width: 1fr; }
     SettingsScreen.narrow .actions { height: 6; layout: grid; grid-size: 3; grid-gutter: 0; }
     SettingsScreen.narrow .actions Button { width: 100%; min-width: 6; }
     .actions { height: 3; }
@@ -384,15 +444,18 @@ class EchoApp(App, inherit_bindings=False):
         self.pending_logs = []
 
     def compose(self):
-        yield Static("EchoLiveTUI", id="top", markup=False)
-        yield Static("", id="route", markup=False)
+        yield DisplayText("EchoLiveTUI", id="top", markup=False)
+        yield DisplayText("", id="route", markup=False)
         yield HistoryLog(id="log", wrap=True, markup=False, max_lines=2000)
         yield Static("", id="error", markup=False)
-        yield Static("", id="context", markup=False)
+        yield DisplayText("", id="context", markup=False)
         yield Static("", id="suggestions", markup=False)
         yield ComposerInput(placeholder="输入消息，或 /help", id="entry")
-        yield Static("", id="enhancements", markup=False)
-        yield Static("", id="hints", markup=False)
+        yield DisplayText("", id="enhancements", markup=False)
+        with Horizontal(id="footer"):
+            yield DisplayText("", id="hints", markup=False)
+            yield ActionLink("settings", name="settings", id="settings-link")
+            yield ActionLink("endpoints", name="endpoints", id="endpoints-link")
 
     async def on_mount(self):
         self.query_one("#error").display = False
@@ -424,11 +487,11 @@ class EchoApp(App, inherit_bindings=False):
         entry = self.query_one("#entry", Input)
         self.query_one("#context", Static).update(f"{s['message.username']} → {names[:30]} · 原文 {len(entry.value)} 字")
         quote = "".join(quote_symbols(s)) if s["message.quote"] else "关"
-        paren = "仅下一条" if core.paren_once else "开" if s["message.paren"] else "关"
-        basic = f"引号{quote[:8]} · 括号{paren}"
+        paren = "仅下一条" if core.paren_once else "【】" if s["message.username_brackets"] else "关"
+        basic = f"引号{quote[:8]} · 姓名框{paren}"
         more = f" · 后缀{'开' if s['message.suffix'] else '关'} · 模拟打字 {s['message.typewriting_scheme'] if s['message.typewriting'] else '关'} · {s['message.print_speed']}ms · 停顿{'开' if s['message.autopause'] else '关'}"
         self.query_one("#enhancements", Static).update(basic + (more if self.size.width >= 80 else " · 增强 +4"))
-        self.query_one("#hints", Static).update(("Tab/方向键选择 · Enter 补全 · Esc 关闭" if self.completing else "Enter 发送 · / 命令 · /settings 设置") + f"  输入提示：{core.typing_state}")
+        self.query_one("#hints", Static).update(("Tab/↑↓ 选择 · Enter 补全 · Esc 关闭" if self.completing else "Enter 发送 · / 命令") + f"  输入提示：{core.typing_state}")
 
     @on(Input.Changed, "#entry")
     def input_changed(self, event):
@@ -498,7 +561,7 @@ class EchoApp(App, inherit_bindings=False):
         if name == "quit":
             self.exit()
         elif name == "settings":
-            self.push_screen(EndpointsScreen() if args and args[0] in {"routing", "endpoints"} else SettingsScreen(args[0] if args else "input"), self.return_focus)
+            self.push_screen(SettingsScreen("endpoints" if args and args[0] == "routing" else args[0] if args else "input"), self.return_focus)
         elif name == "endpoints":
             self.push_screen(EndpointsScreen(), self.return_focus)
         elif name == "compose":

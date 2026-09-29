@@ -40,3 +40,19 @@ async def test_setting_conflict(tmp_path):
     await core.apply({"message.username": "Other"})
     with pytest.raises(ValueError, match="冲突"):
         await core.apply({"message.username": "Draft"}, baseline)
+
+
+async def test_paren_only_changes_username(tmp_path):
+    from echolivetui.pipeline import prepare
+    core = Core(Settings(tmp_path / "s.yaml"), tmp_path)
+    core.settings.values["message.typewriting"] = False
+    await execute(core, parse("/paren off"))
+    assert prepare("正文", core.settings).data["username"] == "Someone"
+    await execute(core, parse("/paren once"))
+    message = prepare("正文", core.settings, core.paren_once)
+    assert message.data["username"] == "【Someone】"
+    assert message.plain == '"正文"'
+    assert core.settings["message.username_brackets"] is False
+    await execute(core, parse("/paren on"))
+    assert core.settings["message.username_brackets"] is True
+    assert "message.paren" not in core.settings.values

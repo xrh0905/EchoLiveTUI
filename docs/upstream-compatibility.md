@@ -50,7 +50,7 @@
 | P0 | 未知类型默认当 `live`，未列出 `character` | 会错投消息；识别 `live/history/character/server/client/unknown`，未知终端不能默认接收文字 |
 | P0 | 未支持 `editor_typing` | 新增输入活动控制器；与消息使用同一发送者 UUID；旧版本降级 |
 | 阶段二 | `/skip` 还给 history 发 `echo_next` | 两个目标版本的历史页都不处理 `echo_next`；第一版不提供 `/skip`，阶段二重做播放/取消语义。历史更新用 `echo_printing`，清空用 `history_clear` |
-| P0 | 配置仅有监听 `host/port`，发送仅按角色过滤 | 增加端点详情、选择/排除、UUID/名称目标、历史来源绑定，尊重定向模式 |
+| P0 | 配置仅有监听 `host/port`，发送仅按角色过滤 | 增加端点详情、选择/排除、UUID/名称目标和独立历史投递；本地默认覆盖全部在线字幕端 |
 | P0 | 只有 `/`、`/ws`、`/healthz` | 当前目录识别成功后增加静态托管及 `GET /config.js` 响应覆盖 |
 | P1 | 每连接队列无上限，消息延迟与指令在同一发送循环 | 有界消息队列；历史清空与 typing 不排在长消息延迟后；断线清理、不自动重播。播放中断另在阶段二设计 |
 | P1 | 命令、网络、配置写入与 Rich 输出集中在 `EchoServer` | 将 core、commands、pipeline、protocol/hub、hosting、Textual UI 分开 |
@@ -72,7 +72,7 @@ live ─────── BroadcastChannel ──→ history
 - 该开关只禁止 BC 发送，不禁止 BC 接收。受托管页面还应使用本次进程专有的 channel，与同源的非托管页面隔离。
 - 不要设 `echolive.broadcast.enable = false`：它会阻止广播对象建立，WS 也随之不可用。
 - 不要用“相同文本 + 时间窗”吞消息：用户可能故意重复发送。`allow_send_duplicate_message` 与 `history.message.remove_continuous_duplicate` 是展示行为，不是网络去重协议。
-- 即使只有 WS，两个 live 同时打印同一字幕仍会生成两个不同来源的 `echo_printing`。当前实现由 ELTUI 从已接受消息独立生成历史，字幕打印回报不再送给 history；不依赖内容哈希或 live 来源绑定。
+- 即使只有 WS，两个 live 同时打印同一字幕仍会生成两个不同来源的 `echo_printing`。当前实现由 EchoLiveTUI 从已接受消息独立生成历史，字幕打印回报不再送给 history；不依赖内容哈希或 live 来源绑定。
 - 外部手动配置的页面不受响应覆盖控制，必须在它们的原配置中采用同样的 WS 单路径设置。第一版不承诺修复任意混合拓扑。
 
 ## 5. 输入状态：实际协议
