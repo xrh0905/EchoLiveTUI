@@ -39,6 +39,7 @@ class Core:
                 raise ValueError(f"设置冲突：{key} 已被其他操作修改；请丢弃草稿后重试")
             candidate[key] = coerce(key, value)
         self.settings.validate(candidate)
+        old_hide_latest = self.settings["history.hide_latest"]
         old_address = self.server.address
         new_address = candidate["listen.host"], candidate["listen.port"]
         changed = old_address is not None and old_address != new_address
@@ -53,6 +54,8 @@ class Core:
         if self.server.site is None and self.server.runner is not None:
             await self.server.start(*new_address)
         self.cancel_typing()
+        if old_hide_latest and not self.settings["history.hide_latest"]:
+            self.hub.history.flush()
 
     def save_routing(self, changes):
         routing = copy.deepcopy(self.settings.routing)
@@ -62,7 +65,8 @@ class Core:
     def submit(self, text):
         prepared = prepare(text, self.settings, self.paren_once)
         targets = self.hub.targets()
-        if not targets and not self.settings["osc.enable"]:
+        history_count = len(self.hub.history.receivers())
+        if not targets and not history_count and not self.settings["osc.enable"]:
             raise ValueError("没有可发送的字幕端，草稿已保留；请连接或选择端点")
         count = self.hub.broadcast(prepared.data, prepared.delay)
         osc_sent = False
@@ -73,12 +77,13 @@ class Core:
             except Exception as exc:
                 self.osc_error = str(exc)
                 self.report(f"OSC 发送失败：{exc}")
-        if not count and not osc_sent:
+        if not count and not history_count and not osc_sent:
             raise ValueError("OSC 发送失败，草稿已保留")
         self.paren_once = False
         self.cancel_typing()
-        result = f"{self.settings['message.username']}：{text} · 已排队 {count} 端" + (" · OSC 已发送" if osc_sent else "")
+        result = f"{self.settings['message.username']}：{text}"
         self.report(result)
+        self.hub.log(f"已接受：字幕 {count} · 历史 {history_count}" + (" · OSC 已发送" if osc_sent else ""))
         return result
 
     def cancel_typing(self):

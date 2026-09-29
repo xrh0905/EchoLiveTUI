@@ -54,3 +54,27 @@ async def test_compose_literal_paste_and_ctrl_guard(tmp_path):
         assert app.core.settings["message.username"] == "Someone"
         await pilot.press("escape", "ctrl+c")
         assert app.is_running
+
+
+async def test_endpoint_page_and_log_settings(tmp_path):
+    app = EchoApp(Settings(tmp_path / "s.yaml"), tmp_path, start_server=False)
+    async with app.run_test(size=(80, 24)) as pilot:
+        app.open_screen("endpoints")
+        await pilot.pause()
+        await pilot.press("escape")
+        app.open_screen("settings", ["log"])
+        await pilot.pause()
+        app.screen.query_one("#field-log-level", Select).value = "info"
+        await pilot.pause()
+        await pilot.click("#save")
+        await pilot.pause()
+        assert app.core.settings["log.level"] == "info"
+
+
+async def test_command_completion_does_not_execute(tmp_path):
+    app = EchoApp(Settings(tmp_path / "s.yaml"), tmp_path, start_server=False)
+    async with app.run_test() as pilot:
+        await pilot.press("/", "s", "e", "tab", "enter")
+        await pilot.pause()
+        assert len(app.screen_stack) == 1
+        assert app.query_one("#entry", Input).value.startswith("/settings")

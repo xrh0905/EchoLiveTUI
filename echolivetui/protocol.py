@@ -7,7 +7,7 @@ import time
 import uuid
 
 ROLES = {"live", "history", "character", "server", "client"}
-LIVE_ACTIONS = {"message_data", "editor_typing", "echo_next", "set_live_display", "set_theme"}
+LIVE_ACTIONS = {"message_data", "editor_typing", "echo_next", "set_live_display", "set_theme", "set_theme_style_url"}
 HISTORY_ACTIONS = {"echo_printing", "history_clear", "live_display_update"}
 CHARACTER_ACTIONS = {"set_avatar"}
 

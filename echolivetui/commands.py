@@ -6,14 +6,14 @@ import shlex
 from .config import FIELDS, coerce
 
 HELP = {
-    "settings": "/settings [input|listen|message|typing|routing|osc] — 设置界面",
+    "settings": "/settings [input|typewriting|formatting|typing|endpoints|network|history|log|osc] — 设置界面",
     "set": "/set key value — 修改并保存设置",
     "name": "/name [名字] — 设置或查看说话人",
     "quote": "/quote [on|off|en|cn|jp|custom] — 引号开关/样式",
     "paren": "/paren [once|on|off] — 下一条或持续使用括号",
     "endpoints": "/endpoints — 客户端识别、目标与历史来源",
     "target": "/target all|reset|set 选择器...|exclude 选择器...",
-    "history": "/history clear | /history source 历史端 字幕端|auto",
+    "history": "/history clear — 清空独立历史记录",
     "status": "/status — 服务与端点摘要",
     "compose": "/compose — 多行草稿",
     "source": "/source 文件 — 预检查后执行脚本",
@@ -38,7 +38,11 @@ def parse(text, script=False):
     if not text.startswith("/"):
         return Command("text", [text])
     try:
-        parts = shlex.split(text[1:], posix=True)
+        lexer = shlex.shlex(text[1:], posix=True)
+        lexer.whitespace_split = True
+        lexer.commenters = ""
+        lexer.escape = ""  # Preserve Windows paths; quotes still group spaces.
+        parts = list(lexer)
     except ValueError as exc:
         raise ValueError(f"命令引号不完整：{exc}") from None
     if not parts:
@@ -60,7 +64,7 @@ def parse(text, script=False):
     if name in {"quit", "compose", "endpoints", "status"}:
         valid = not args
     elif name == "settings":
-        valid = len(args) <= 1 and (not args or args[0] in {"input", "listen", "message", "typing", "routing", "osc"})
+        valid = len(args) <= 1 and (not args or args[0] in {"input", "listen", "message", "typing", "routing", "osc", "typewriting", "formatting", "endpoints", "network", "log", "history"})
     elif name == "set":
         valid = len(args) >= 2
         if valid:
@@ -73,7 +77,7 @@ def parse(text, script=False):
     elif name == "target":
         valid = bool(args) and ((args[0] in {"all", "reset"} and len(args) == 1) or (args[0] in {"set", "exclude"} and len(args) > 1))
     elif name == "history":
-        valid = args == ["clear"] or (len(args) == 3 and args[0] == "source")
+        valid = args == ["clear"]
     if not valid:
         raise ValueError(HELP[name])
     return Command(name, args)
@@ -118,21 +122,7 @@ async def execute(core, command):
                 core.hub.resolve(selector, "live")
             core.save_routing({"targets": args[1:], "exclude": []} if args[0] == "set" else {"exclude": args[1:]})
     elif name == "history":
-        if args == ["clear"]:
-            for peer in core.hub.peers.values():
-                if peer.profile.role == "history":
-                    peer.enqueue(core.hub.sender.envelope("history_clear", {}, peer.profile.uuid), fast=True)
-        else:
-            core.hub.resolve(args[1], "history")
-            if args[2] != "auto":
-                core.hub.resolve(args[2], "live")
-            mapping = dict(settings.routing["history"])
-            if args[2] == "auto":
-                mapping.pop(args[1], None)
-                core.hub.history_sources.clear()
-            else:
-                mapping[args[1]] = args[2]
-            core.save_routing({"history": mapping})
+        core.hub.history.clear()
     elif name == "source":
         lines = Path(args[0]).read_text(encoding="utf-8-sig").splitlines()
         commands = []

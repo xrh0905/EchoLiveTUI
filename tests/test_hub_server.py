@@ -32,22 +32,25 @@ async def connect(session, url, uid, role="live"):
     return ws
 
 
-async def test_individual_broadcast_and_single_history_source(running):
+async def test_individual_broadcast_and_independent_history(running):
     hub, server, session, url = running
     a = await connect(session, url, "a")
     b = await connect(session, url, "b")
     h = await connect(session, url, "h", "history")
-    assert hub.broadcast({"messages": []}, 0) == 2
+    data = {"username": "Speaker", "messages": [{"message": "same"}]}
+    assert hub.broadcast(data, 0) == 2
     assert (await a.receive_json())["target"] == "a"
     assert (await b.receive_json())["target"] == "b"
     await a.send_json(packet("a", action="echo_printing", text="same"))
     await b.send_json(packet("b", action="echo_printing", text="same"))
-    assert (await h.receive_json())["from"]["uuid"] == "a"
+    history = await h.receive_json()
+    assert history["from"]["uuid"] == hub.sender.uuid
+    assert history["data"]["message"] == "same"
     with pytest.raises(TimeoutError):
         await asyncio.wait_for(h.receive_json(), .06)
     # An intentional repetition is never content-deduplicated.
-    await a.send_json(packet("a", action="echo_printing", text="same"))
-    assert (await h.receive_json())["data"]["text"] == "same"
+    hub.broadcast(data, 0)
+    assert (await h.receive_json())["data"]["message"] == "same"
 
 
 async def test_reconnect_generation_and_spoof_rejection(running):
@@ -97,7 +100,7 @@ async def test_queue_controls_bypass_playback_delay():
         async def close(self):
             pass
     p = Peer(Socket(), Profile("x"))
-    p.worker = asyncio.create_task(p.write_loop(lambda _: None))
+    p.worker = asyncio.create_task(p.write_loop(lambda *args: None))
     p.enqueue({"action": "message_data"}, 10)
     p.enqueue({"action": "message_data"}, 10)
     await asyncio.sleep(.01)

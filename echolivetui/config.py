@@ -17,6 +17,13 @@ class Field:
     minimum: int | None = None
     maximum: int | None = None
 
+    def effect(self, key):
+        if key.startswith("listen."):
+            return "保存后重建监听" if key != "listen.public_host" else "仅改变显示地址"
+        if key == "typing.enable":
+            return "立即生效；托管网页需刷新"
+        return "下一条消息生效" if key.startswith("message.") else "立即生效"
+
 
 FIELDS = {
     "input.interrupt_guard": Field(True, "防止 Ctrl+C 退出"),
@@ -39,6 +46,8 @@ FIELDS = {
     "message.autopausestr": Field(",，.。;；:：!！", "停顿字符"),
     "message.autopausetime": Field(10, "停顿时长", minimum=0, maximum=60000),
     "typing.enable": Field(False, "输入提示"),
+    "log.level": Field("error", "日志级别", ("error", "info", "debug")),
+    "history.hide_latest": Field(False, "ELTUI 暂存最新一条历史"),
     "osc.enable": Field(False, "VRChat OSC"),
     "osc.host": Field("127.0.0.1", "OSC 地址"),
     "osc.port": Field(9000, "OSC 端口", minimum=1, maximum=65535),
@@ -75,7 +84,7 @@ class Settings:
     def __init__(self, path: Path):
         self.path = path
         self.values = {k: f.default for k, f in FIELDS.items()}
-        self.routing = {"targets": [], "exclude": [], "history": {}, "overrides": {}}
+        self.routing = {"targets": [], "exclude": [], "overrides": {}}
         self.load_error = ""
         if path.exists():
             try:
@@ -87,16 +96,20 @@ class Settings:
                         if not isinstance(entries, dict):
                             raise ValueError("routing 必须为映射")
                         self.routing.update(entries)
+                        # Pre-release prototype used live-source history bindings.
+                        # History now has its own delivery service.
+                        self.routing.pop("history", None)
                         continue
                     if not isinstance(entries, dict):
                         raise ValueError(f"{group} 必须为映射")
                     for key, value in entries.items():
                         self.values[f"{group}.{key}"] = coerce(f"{group}.{key}", value)
                 self.validate(self.values)
+                self.validate_routing(self.routing)
             except (ValueError, OSError, yaml.YAMLError) as exc:
                 self.load_error = str(exc)
                 self.values = {k: f.default for k, f in FIELDS.items()}
-                self.routing = {"targets": [], "exclude": [], "history": {}, "overrides": {}}
+                self.routing = {"targets": [], "exclude": [], "overrides": {}}
 
     def __getitem__(self, key):
         return self.values[key]
@@ -110,12 +123,34 @@ class Settings:
         if values["message.quote_style"] == "custom" and not all(values[k] for k in ("message.quote_open", "message.quote_close")):
             raise ValueError("自定义引号需要左右两个符号")
 
+    def validate_routing(self, routing):
+        if set(routing) != {"targets", "exclude", "overrides"}:
+            raise ValueError("未知 routing 设置")
+        for key in ("targets", "exclude"):
+            if not isinstance(routing[key], list) or not all(isinstance(s, str) for s in routing[key]):
+                raise ValueError(f"routing.{key} 必须为选择器列表")
+        overrides = routing["overrides"]
+        if not isinstance(overrides, dict):
+            raise ValueError("routing.overrides 必须为映射")
+        for selector, override in overrides.items():
+            if not isinstance(selector, str) or not isinstance(override, dict):
+                raise ValueError("无效的能力覆盖")
+            for key, value in override.items():
+                if key == "typing":
+                    if type(value) is not bool:
+                        raise ValueError("typing 能力必须为布尔值")
+                elif key not in {"role", "version", "software", "container"} or not isinstance(value, str):
+                    raise ValueError("未知客户端覆盖字段")
+                elif key == "role" and value not in {"live", "history", "character", "server", "client", "unknown"}:
+                    raise ValueError("未知客户端职责")
+
     def save(self, values=None, routing=None):
         if self.load_error:
             raise ValueError(f"原配置无效，未覆盖：{self.load_error}")
         values = dict(self.values if values is None else values)
         self.validate(values)
         routing = copy.deepcopy(self.routing if routing is None else routing)
+        self.validate_routing(routing)
         data = {}
         for key, value in values.items():
             group, name = key.split(".")

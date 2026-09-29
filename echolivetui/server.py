@@ -26,7 +26,7 @@ class Server:
                     try:
                         peer = await self.hub.receive(ws, json.loads(msg.data), request.remote or "", self.hosting.metadata(request))
                     except (ValueError, TypeError, KeyError) as exc:
-                        self.hub.report(f"无效客户端消息：{exc}")
+                        self.hub.log(f"无效客户端消息：{exc}", "debug")
                 elif msg.type == WSMsgType.ERROR:
                     break
         finally:
@@ -54,14 +54,26 @@ class Server:
             self.runner = web.AppRunner(app)
             await self.runner.setup()
         site = web.TCPSite(self.runner, host, port)
+        previous = self.site
+        old_address = self.address
+        overlapping = previous is not None and old_address[1] == port and old_address != (host, port)
+        if overlapping:
+            await previous.stop()
         try:
             await site.start()
         except OSError as exc:
             self.error = str(exc)
+            if overlapping:
+                rollback = web.TCPSite(self.runner, *old_address)
+                try:
+                    await rollback.start()
+                    self.site = rollback
+                except OSError as rollback_error:
+                    self.site = None
+                    self.error += f"；恢复原监听也失败：{rollback_error}"
             raise ValueError(f"监听失败 {host}:{port}：{exc}") from exc
-        previous = self.site
         self.site, self.address, self.error = site, (host, port), ""
-        if previous:
+        if previous and not overlapping:
             await previous.stop()
 
     async def close(self):

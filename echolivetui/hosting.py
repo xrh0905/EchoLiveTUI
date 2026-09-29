@@ -50,6 +50,10 @@ class Hosting:
   e.auto_url = false;
   e.disable_broadcast = true;
   if (config.echolive.typing) config.echolive.typing.enable = TYPING;
+  if (config.history && config.history.message) {
+    config.history.message.latest_message_hide = false;
+    config.history.message.live_display_hidden_latest_message_show = false;
+  }
 })();
 """.replace("TOKEN", json.dumps(self.token)).replace("TYPING", json.dumps(self.settings["typing.enable"]))
 

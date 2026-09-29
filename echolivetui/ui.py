@@ -10,7 +10,7 @@ from textual.message import Message
 from textual.screen import ModalScreen
 from textual.widgets import Button, Checkbox, Input, Label, Select, RichLog, Static, TextArea
 from .commands import HELP, execute, parse
-from .config import FIELDS
+from .config import FIELDS, Settings, coerce
 from .core import Core
 from .pipeline import quote_symbols
 
@@ -46,7 +46,8 @@ class SettingsScreen(ModalScreen):
         with Vertical(id="dialog"):
             yield Label("设置 · 修改后保存应用；Esc 保留草稿返回", classes="title")
             with Horizontal(classes="filters"):
-                yield Select([(g, g) for g in ("input", "listen", "message", "typing", "osc", "all")], value=self.group, allow_blank=False, id="category")
+                groups = ("input", "typewriting", "formatting", "typing", "network", "endpoints", "history", "log", "osc", "all", "message")
+                yield Select([(g, g) for g in groups], value={"listen": "network"}.get(self.group, self.group), allow_blank=False, id="category")
                 yield Input(placeholder="搜索名称或设置键", id="search")
             with VerticalScroll(id="fields"):
                 for key, field in FIELDS.items():
@@ -54,19 +55,21 @@ class SettingsScreen(ModalScreen):
                     wid = "field-" + key.replace(".", "-")
                     with Horizontal(classes="setting-row", id="row-" + wid):
                         label = Label(field.label)
-                        label.tooltip = key
+                        label.tooltip = f"{key}\n默认：{field.default}\n{field.effect(key)}"
                         yield label
                         if isinstance(field.default, bool):
                             yield Checkbox(value=value, id=wid, name=key)
                         elif field.choices:
                             yield Select([(x, x) for x in field.choices], value=value, allow_blank=False, id=wid, name=key)
                         else:
-                            yield Input(str(value), id=wid, name=key)
+                            yield Input(str(value), id=wid, name=key, type="integer" if isinstance(field.default, int) else "text")
+            yield Static("", id="setting-info", markup=False)
             yield Static("", id="settings-error", markup=False)
             with Horizontal(classes="actions"):
                 yield Button("保存应用", id="save", variant="primary")
                 yield Button("恢复默认", id="reset")
                 yield Button("丢弃草稿", id="discard")
+                yield Button("重新载入", id="reload")
                 yield Button("返回", id="back")
 
     def on_mount(self):
@@ -76,7 +79,27 @@ class SettingsScreen(ModalScreen):
         group = self.query_one("#category", Select).value
         search = self.query_one("#search", Input).value.casefold()
         for key, field in FIELDS.items():
-            self.query_one("#row-field-" + key.replace(".", "-")).display = (group == "all" or key.startswith(str(group) + ".")) and (not search or search in (key + field.label).casefold())
+            belongs = self.belongs(key, group)
+            self.query_one("#row-field-" + key.replace(".", "-")).display = (bool(search) or belongs) and (not search or search in (key + field.label).casefold())
+        network = self.app.core.server
+        host = self.app.core.settings['listen.public_host'] or self.app.core.settings['listen.host']
+        hint = f"http://{host}:{self.app.core.settings['listen.port']}/live.html · 配置覆盖仅作用 HTTP 响应；浏览器刷新生效" if network.hosting.root else "当前目录未识别 Echo Live；仅提供 WS 服务。"
+        self.query_one("#setting-info", Static).update(hint if group == "network" else "悬停字段查看默认值及生效方式；重置仅修改当前分类草稿。")
+
+    @staticmethod
+    def belongs(key, group):
+        if group == "all":
+            return True
+        if group == "network":
+            return key.startswith("listen.")
+        if group == "input":
+            return key.startswith("input.") or key == "message.username"
+        simulation = {"message.typewriting", "message.typewriting_scheme", "message.print_speed", "message.autopause", "message.autopausestr", "message.autopausetime"}
+        if group == "typewriting":
+            return key in simulation
+        if group == "formatting":
+            return key.startswith("message.") and key not in simulation and key != "message.username"
+        return key.startswith(str(group) + ".")
 
     @on(Input.Changed)
     @on(Checkbox.Changed)
@@ -85,6 +108,10 @@ class SettingsScreen(ModalScreen):
         event.stop()
         widget = event.control
         if widget.id in {"search", "category"}:
+            if widget.id == "category" and event.value == "endpoints":
+                self.dismiss()
+                self.app.call_after_refresh(self.app.open_screen, "endpoints")
+                return
             self.filter_fields()
         elif widget.name in FIELDS:
             self.app.settings_draft[widget.name] = event.value
@@ -95,15 +122,26 @@ class SettingsScreen(ModalScreen):
         action = event.button.id
         if action == "save":
             try:
-                updates = {k: v for k, v in self.app.settings_draft.items() if v != self.app.settings_base[k]}
+                updates = {k: coerce(k, v) for k, v in self.app.settings_draft.items() if coerce(k, v) != self.app.settings_base[k]}
                 await self.app.core.apply(updates, self.app.settings_base)
             except (ValueError, OSError) as exc:
                 self.query_one("#settings-error", Static).update(str(exc))
                 return
             self.app.settings_draft = None
             self.dismiss()
-        elif action in {"reset", "discard"}:
-            values = {k: f.default for k, f in FIELDS.items()} if action == "reset" else dict(self.app.core.settings.values)
+        elif action in {"reset", "discard", "reload"}:
+            values = dict(self.app.settings_draft)
+            if action == "reset":
+                group = self.query_one("#category", Select).value
+                values.update({k: f.default for k, f in FIELDS.items() if self.belongs(k, group)})
+            elif action == "reload":
+                loaded = Settings(self.app.core.settings.path)
+                if loaded.load_error:
+                    self.query_one("#settings-error", Static).update(loaded.load_error)
+                    return
+                values = dict(loaded.values)
+            else:
+                values = dict(self.app.core.settings.values)
             self.app.settings_draft = values
             if action == "discard":
                 self.app.settings_base = dict(values)
@@ -168,14 +206,17 @@ class EndpointsScreen(ModalScreen):
                     yield Label("排除目标")
                     yield Input(" ".join(self.app.core.settings.routing["exclude"]), id="exclude")
                 with Horizontal(classes="setting-row"):
-                    yield Label("历史来源（当前选择的历史端）")
-                    yield Select([("自动", "auto")], value="auto", allow_blank=False, id="history-source")
-                with Horizontal(classes="setting-row"):
                     yield Label("手动职责（当前端点）")
                     yield Select([(x, x) for x in ("auto", "live", "history", "character", "server", "unknown")], value="auto", allow_blank=False, id="role")
                 with Horizontal(classes="setting-row"):
                     yield Label("输入提示能力（当前端点）")
                     yield Select([("自动/未知", "auto"), ("支持", "yes"), ("不支持", "no")], value="auto", allow_blank=False, id="typing-capability")
+                for key, label in (("software", "软件覆盖"), ("version", "版本覆盖"), ("container", "容器覆盖（如 OBS）")):
+                    with Horizontal(classes="setting-row"):
+                        yield Label(label)
+                        yield Input(placeholder="留空使用识别结果", id="profile-" + key)
+                yield Checkbox("按唯一名称保存覆盖（否则仅当前 UUID）", id="persist-name")
+                yield Static("历史端独立接收已接受的消息，不依赖字幕端回报。显示策略见 /settings history。", markup=False)
             yield Static("", id="endpoint-error", markup=False)
             with Horizontal(classes="actions"):
                 yield Button("保存", id="save", variant="primary")
@@ -188,7 +229,6 @@ class EndpointsScreen(ModalScreen):
     def refresh_peers(self):
         peers = self.app.core.hub.peers
         self.query_one("#peer", Select).set_options([(f"{p.profile.name} · {p.profile.role} · {uid[:8]}", uid) for uid, p in peers.items()])
-        self.query_one("#history-source", Select).set_options([("自动", "auto")] + [(p.profile.name, uid) for uid, p in peers.items() if p.profile.role == "live"])
 
     @on(Select.Changed, "#peer")
     def selected(self, event):
@@ -197,14 +237,13 @@ class EndpointsScreen(ModalScreen):
             return
         p = peer.profile
         self.query_one("#peer-detail", Static).update(f"{p.uuid}\n{p.software} · {p.role} · 版本 {p.version or '未知'} · {p.container}\nIP {p.ip} · 隐藏 {p.hidden} · 定向 {p.targeted} · 队列 {peer.queue.qsize()}\n证据：{'；'.join(p.evidence)}\n状态：{p.state}")
-        override = self.app.core.settings.routing["overrides"].get(p.uuid, {})
+        overrides = self.app.core.settings.routing["overrides"]
+        override = overrides.get(p.uuid, overrides.get("@" + p.name, {}))
+        self.query_one("#persist-name", Checkbox).value = p.uuid not in overrides and "@" + p.name in overrides
         self.query_one("#role", Select).value = override.get("role", "auto")
         self.query_one("#typing-capability", Select).value = "auto" if "typing" not in override else ("yes" if override["typing"] else "no")
-        source = self.app.core.settings.routing["history"].get(p.uuid, "auto")
-        try:
-            self.query_one("#history-source", Select).value = source
-        except Exception:
-            self.query_one("#history-source", Select).value = "auto"
+        for key in ("software", "version", "container"):
+            self.query_one("#profile-" + key, Input).value = override.get(key, "")
 
     @on(Button.Pressed)
     def button(self, event):
@@ -226,6 +265,10 @@ class EndpointsScreen(ModalScreen):
                 uid = self.query_one("#peer", Select).value
                 peer = core.hub.peers.get(uid)
                 if peer:
+                    persistent = self.query_one("#persist-name", Checkbox).value
+                    selector = "@" + peer.profile.name if persistent else uid
+                    if persistent:
+                        core.hub.resolve(selector)
                     role = self.query_one("#role", Select).value
                     typing = self.query_one("#typing-capability", Select).value
                     override = {}
@@ -233,19 +276,16 @@ class EndpointsScreen(ModalScreen):
                         override["role"] = role
                     if typing != "auto":
                         override["typing"] = typing == "yes"
-                    routing["overrides"][uid] = override
-                    if peer.profile.role == "history":
-                        source = self.query_one("#history-source", Select).value
-                        routing["history"].pop(uid, None)
-                        if source != "auto":
-                            routing["history"][uid] = source
+                    for key in ("software", "version", "container"):
+                        value = self.query_one("#profile-" + key, Input).value.strip()
+                        if value:
+                            override[key] = value
+                    routing["overrides"].pop(uid, None)
+                    routing["overrides"].pop("@" + peer.profile.name, None)
+                    routing["overrides"][selector] = override
                 core.settings.save(routing=routing)
                 if peer:
-                    if "role" in override:
-                        peer.profile.role = override["role"]
-                    if "typing" in override:
-                        peer.profile.capabilities["typing"] = override["typing"]
-                core.hub.history_sources.clear()
+                    core.hub.apply_override(peer)
                 self.dismiss()
             except (ValueError, OSError) as exc:
                 self.query_one("#endpoint-error", Static).update(str(exc))
@@ -284,6 +324,7 @@ class EchoApp(App, inherit_bindings=False):
     .actions { height: 3; }
     .actions Button { min-width: 10; width: 1fr; }
     #settings-error, #compose-error, #endpoint-error { height: auto; color: #ffaaa0; max-height: 3; }
+    #setting-info { height: auto; max-height: 2; color: #91a7b9; }
     #peer-detail { height: auto; max-height: 6; }
     #multiline { height: 1fr; }
     """
@@ -331,7 +372,7 @@ class EchoApp(App, inherit_bindings=False):
             self.pending_logs.append(text)
 
     def refresh_status(self):
-        if not self.is_mounted:
+        if not self.is_mounted or not self.query("#top"):
             return
         core, s = self.core, self.core.settings
         targets = core.hub.targets()
@@ -416,7 +457,7 @@ class EchoApp(App, inherit_bindings=False):
         if name == "quit":
             self.exit()
         elif name == "settings":
-            self.push_screen(EndpointsScreen() if args and args[0] == "routing" else SettingsScreen(args[0] if args else "message"), self.return_focus)
+            self.push_screen(EndpointsScreen() if args and args[0] in {"routing", "endpoints"} else SettingsScreen(args[0] if args else "input"), self.return_focus)
         elif name == "endpoints":
             self.push_screen(EndpointsScreen(), self.return_focus)
         elif name == "compose":
