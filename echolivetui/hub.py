@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 import time
 from .protocol import Profile, Sender, target_matches, validate_envelope, version_tuple
 from .history import HistoryDelivery, entries_from_data
+from .message import typewrite_incoming
 
 
 @dataclass
@@ -143,7 +144,7 @@ class Hub:
             self.log(f"断开：{peer.profile.name}")
         await peer.close()
 
-    async def receive(self, ws, raw, ip="", metadata=None):
+    async def receive(self, ws, raw, ip="", metadata=None, *, remote=False):
         envelope = validate_envelope(raw)
         uid = envelope["from"]["uuid"]
         # A socket represents one endpoint; changing UUID is not a new identity.
@@ -164,6 +165,8 @@ class Hub:
         if envelope.get("target") == "@__ws_server":
             return peer
         if action == "message_data":
+            if remote and self.settings["lan.typewriting"]:
+                envelope = {**envelope, "data": typewrite_incoming(envelope.get("data", {}), self.settings["message.typewriting_scheme"])}
             entries = list(entries_from_data(envelope.get("data", {})))
             self.history.publish(entries)
             if peer.profile.role == "server":

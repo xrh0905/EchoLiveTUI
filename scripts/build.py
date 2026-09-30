@@ -2,6 +2,7 @@
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -18,9 +19,11 @@ def main():
     if sys.platform != "win32":
         parser.error("此构建脚本面向 Windows x64")
     from echolivetui import __version__
+    # Windows version resources require numeric components, including prereleases.
+    windows_version = ".".join(re.findall(r"\d+", __version__)[:4])
     output = root / "build" / args.mode
     output.mkdir(parents=True, exist_ok=True)
-    command = [sys.executable, "-m", "nuitka", f"--mode={args.mode}", "--msvc=latest", "--assume-yes-for-downloads", "--windows-console-mode=force", f"--jobs={args.jobs}", "--include-package=echolivetui", "--include-package=textual", "--include-package=rich", "--include-package-data=textual", "--include-package-data=jieba", "--include-package-data=pypinyin", "--include-distribution-metadata=textual", "--include-distribution-metadata=rich", "--output-filename=EchoLiveTUI.exe", f"--output-dir={output}", f"--report={output / 'compilation-report.xml'}", f"--product-version={__version__}", f"--file-version={__version__}", "--product-name=EchoLiveTUI", "--file-description=Echo Live terminal broadcaster", str(root / "launcher.py")]
+    command = [sys.executable, "-m", "nuitka", f"--mode={args.mode}", "--msvc=latest", "--assume-yes-for-downloads", "--windows-console-mode=force", f"--jobs={args.jobs}", "--include-package=echolivetui", "--include-package=textual", "--include-package=rich", "--include-package-data=textual", "--include-package-data=jieba", "--include-package-data=pypinyin", "--include-distribution-metadata=textual", "--include-distribution-metadata=rich", "--output-filename=EchoLiveTUI.exe", f"--output-dir={output}", f"--report={output / 'compilation-report.xml'}", f"--product-version={windows_version}", f"--file-version={windows_version}", "--product-name=EchoLiveTUI", "--file-description=Echo Live terminal broadcaster", str(root / "launcher.py")]
     if args.mode == "onefile":
         # Otherwise Nuitka's parent can kill the child after Ctrl+C even when
         # Python/Textual intentionally keeps it running. Requires Nuitka >=2.8.1.

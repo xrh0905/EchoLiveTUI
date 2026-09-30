@@ -11,6 +11,7 @@ from echolivetui.message import (
     get_typewriting_string,
     parse_message,
     render,
+    typewrite_incoming,
 )
 
 
@@ -70,4 +71,26 @@ def test_autopause_delay_and_render_payload() -> None:
 def test_typewriting_schemes() -> None:
     assert get_typewriting_string("凉宫", "pinyin") == "liang'gong"
     assert get_typewriting_string("凉宫", "zhuyin")
+
+
+def test_incoming_typewriting_preserves_editor_fields():
+    import copy
+    data = {"username": "手机", "messages": [
+        {"message": "你好世界", "data": {"printSpeed": 42}},
+        {"message": [{"text": "凉宫", "style": {"bold": True}, "speed": 7, "event": "shout"},
+                     {"text": "现有", "typewrite": "custom"}, {"pause": 4},
+                     {"data": {"emoji": "smile"}}, "文字"]},
+    ]}
+    before = copy.deepcopy(data)
+    result = typewrite_incoming(data, "zhuyin")
+    assert data == before
+    assert result["username"] == "手机"
+    assert result["messages"][0]["data"] == {"printSpeed": 42}
+    plain = result["messages"][0]["message"]
+    assert "".join(part["text"] for part in plain) == "你好世界"
+    assert all(part["typewrite"] for part in plain)
+    parts = result["messages"][1]["message"]
+    assert parts[0] == {**data["messages"][1]["message"][0], "typewrite": get_typewriting_string("凉宫", "zhuyin")}
+    assert parts[1:4] == data["messages"][1]["message"][1:4]
+    assert parts[4]["text"] == "文字"
 

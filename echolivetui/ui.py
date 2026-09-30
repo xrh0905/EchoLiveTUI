@@ -228,7 +228,7 @@ class SettingsScreen(ModalScreen):
             return key.startswith("input.") or key == "message.username"
         simulation = {"message.typewriting", "message.typewriting_scheme", "message.print_speed", "message.autopause", "message.autopausestr", "message.autopausetime"}
         if group == "typewriting":
-            return key in simulation
+            return key in simulation or key == "lan.typewriting"
         if group == "formatting":
             return key.startswith("message.") and key not in simulation and key != "message.username"
         return key.startswith(str(group) + ".")

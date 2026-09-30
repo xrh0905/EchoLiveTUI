@@ -108,3 +108,27 @@ async def test_queue_controls_bypass_playback_delay():
     await asyncio.sleep(.01)
     assert sent == ["message_data", "editor_typing"]
     await p.close()
+
+
+@pytest.mark.parametrize("remote,enabled", [(True, True), (True, False), (False, True)])
+async def test_lan_incoming_typewriting_and_history(running, monkeypatch, remote, enabled):
+    hub, server, session, url = running
+    live = await connect(session, url, "live")
+    history = await connect(session, url, "history", "history")
+    editor = await connect(session, url, "editor", "server")
+    monkeypatch.setattr(server, "is_remote", lambda request: remote)
+    hub.settings.values["lan.typewriting"] = enabled
+    # The LAN switch is independent of the local message switch.
+    hub.settings.values["message.typewriting"] = False
+    source = packet("editor", "server", "message_data", username="手机", messages=[{"message": "你好"}])
+    source["target"] = "live"
+    await editor.send_json(source)
+    received = await asyncio.wait_for(live.receive_json(), 2)
+    assert received["from"] == source["from"]
+    assert received["target"] == "live"
+    if remote and enabled:
+        assert received["data"]["messages"][0]["message"] == [{"text": "你好", "typewrite": "ni'hao"}]
+    else:
+        assert received == source
+    entry = await asyncio.wait_for(history.receive_json(), 2)
+    assert entry["data"] == {"username": "手机", "message": "你好"}

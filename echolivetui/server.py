@@ -47,7 +47,7 @@ class Server:
             async for msg in ws:
                 if msg.type == WSMsgType.TEXT:
                     try:
-                        peer = await self.hub.receive(ws, json.loads(msg.data), request.remote or "", self.hosting.metadata(request))
+                        peer = await self.hub.receive(ws, json.loads(msg.data), request.remote or "", self.hosting.metadata(request), remote=self.is_remote(request))
                     except (ValueError, TypeError, KeyError) as exc:
                         self.hub.log(f"无效客户端消息：{exc}", "debug")
                 elif msg.type == WSMsgType.ERROR:

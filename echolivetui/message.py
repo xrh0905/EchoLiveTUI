@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import copy
 import re
 import string
 from typing import Any, Dict, Iterable, List, Optional
@@ -93,6 +94,35 @@ def _tokenize_for_typewrite(text: str) -> List[str]:
         tokens.append(text[last_end:])
 
     return [token for token in tokens if token]
+
+
+def typewrite_incoming(data: dict, scheme: str) -> dict:
+    """Add phonetics to incoming wire text without reparsing editor formatting."""
+    result = copy.deepcopy(data)
+
+    def transform(message):
+        if isinstance(message, str):
+            return [transform({"text": token}) for token in _tokenize_for_typewrite(message)]
+        if isinstance(message, list):
+            parts = []
+            for part in message:
+                converted = transform(part)
+                parts.extend(converted if isinstance(converted, list) else [converted])
+            return parts
+        if isinstance(message, dict):
+            text = message.get("text")
+            if isinstance(text, str) and text and "typewrite" not in message:
+                message["typewrite"] = get_typewriting_string(text, scheme)
+        return message
+
+    messages = result.get("messages")
+    if isinstance(messages, list):
+        for index, message in enumerate(messages):
+            if isinstance(message, dict) and "message" in message:
+                message["message"] = transform(message["message"])
+            elif isinstance(message, str):
+                messages[index] = {"message": transform(message)}
+    return result
 
 
 def _size_index_from_style(style: Dict[str, Any]) -> int:

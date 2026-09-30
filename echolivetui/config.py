@@ -35,6 +35,7 @@ FIELDS = {
     "listen.public_host": Field("", "显示地址"),
     "lan.enable": Field(False, "局域网发送模式"),
     "lan.host": Field("", "局域网 IPv4（留空自动选择）"),
+    "lan.typewriting": Field(True, "LAN 入站模拟打字"),
     "message.username": Field("Someone", "说话人"),
     "message.username_brackets": Field(True, "姓名括号【】"),
     "message.quote": Field(True, "引号"),
