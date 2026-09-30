@@ -63,6 +63,14 @@ class HistoryLog(RichLog, can_focus=False):
 
 
 class ComposerInput(Input):
+    class SelectionChanged(Message):
+        pass
+
+    def _watch_selection(self, selection):
+        super()._watch_selection(selection)
+        if self.is_mounted:
+            self.post_message(self.SelectionChanged())
+
     async def _on_key(self, event):
         if event.key == "shift+enter":
             event.prevent_default()
@@ -496,7 +504,7 @@ class LanScreen(ModalScreen):
         core = self.app.core
         address = core.server.lan_address
         url = editor_url(*address) if address else ""
-        self.query_one("#lan-state", Static).update("远程监听已启用；访问链接即可发送，不需要签到。" if address else "远程发送未启用。需在完整 Echo Live 目录中启动。")
+        self.query_one("#lan-state", Static).update("远程监听已启用；访问链接即可访问编辑器。" if address else "远程发送未启用。需在完整 Echo Live 目录中启动。")
         self.query_one("#lan-url", Static).update(url)
         qr = self.query_one("#lan-qr", Static)
         qr.display = bool(url)
@@ -830,6 +838,12 @@ class EchoApp(App, inherit_bindings=False):
             entry.value = updated
             entry.selection = Selection(start, end)
             entry.focus()
+
+    @on(ComposerInput.SelectionChanged)
+    @on(TextArea.SelectionChanged)
+    def editor_selection_changed(self, event):
+        for bar in self.query(FormatBar):
+            bar.refresh_visibility()
 
     async def on_unmount(self):
         if hasattr(self, "interrupt_policy"):

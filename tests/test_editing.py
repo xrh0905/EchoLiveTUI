@@ -51,14 +51,18 @@ def test_hosting_only_current_or_single_named_child(tmp_path):
     assert Hosting(tmp_path, "token", settings).root == tmp_path
 
 
-async def test_shift_enter_copies_buffer_and_selection_formatting(tmp_path):
+async def test_shift_enter_copies_buffer_and_selection_formatting(tmp_path, monkeypatch):
+    from echolivetui.ui import FormatBar
+    # Selection must reveal the toolbar without waiting for its periodic refresh.
+    monkeypatch.setattr(FormatBar, "set_interval", lambda *args, **kwargs: None)
     app = EchoApp(Settings(tmp_path / "s.yaml"), tmp_path, start_server=False)
     async with app.run_test(size=(80, 24)) as pilot:
         entry = app.query_one("#entry", Input)
         entry.value = "前面选中后面"
         entry.selection = Selection(2, 4)
         await pilot.pause()
-        await pilot.click("FormatLink")
+        assert app.query_one(FormatBar).display
+        assert await pilot.click("FormatLink")
         await pilot.pause()
         assert entry.value == "前面@b选中@r后面"
         assert entry.selected_text == "选中"
