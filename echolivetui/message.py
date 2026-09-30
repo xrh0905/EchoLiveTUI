@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import string
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -17,9 +18,7 @@ _MARKDOWN = MarkdownIt("commonmark")
 
 TYPEWRITING_SCHEMES = {"pinyin", "zhuyin"}
 DEFAULT_TYPEWRITING_SCHEME = "pinyin"
-EVENT_TOKENS: Dict[str, str] = {
-    "sh": "shout",
-}
+EVENT_TOKENS: Dict[str, str] = {"shout": "shout"}
 
 
 def format_username(config: Dict[str, Any]) -> str:
@@ -155,6 +154,17 @@ def _apply_fast_formatting(text: str, base_style: Dict[str, Any]) -> List[Dict[s
             index += 1
             continue
 
+        if text.startswith("@@", index):
+            buffer.append("@")
+            index += 2
+            continue
+        if text.startswith("@rainbow", index):
+            push_buffer()
+            if "echo-text-rainbow" not in active_classes:
+                active_classes.append("echo-text-rainbow")
+            index += len("@rainbow")
+            continue
+
         event_matched = False
         for marker, event_name in EVENT_TOKENS.items():
             if text.startswith(marker, index + 1):
@@ -202,6 +212,10 @@ def _apply_fast_formatting(text: str, base_style: Dict[str, Any]) -> List[Dict[s
             else:
                 push_buffer()
                 color = text[index + 2 : closing].strip()
+                if not re.fullmatch(r"#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})", color):
+                    buffer.append(text[index:closing + 1])
+                    index = closing + 1
+                    continue
                 if color:
                     current_style["color"] = color
                 else:
@@ -212,15 +226,7 @@ def _apply_fast_formatting(text: str, base_style: Dict[str, Any]) -> List[Dict[s
             if closing == -1:
                 handled = False
             else:
-                push_buffer()
-                identifier = text[index + 2 : closing].strip()
-                if identifier:
-                    emoji_entry: Dict[str, Any] = {"emoji": identifier, "text": ""}
-                    if current_style:
-                        emoji_entry["style"] = current_style.copy()
-                    if active_classes:
-                        emoji_entry["class"] = active_classes.copy()
-                    append_entry(emoji_entry)
+                buffer.append(text[index:closing + 1])
                 index = closing + 1
         elif code == "<":
             pos = index + 2
@@ -233,12 +239,14 @@ def _apply_fast_formatting(text: str, base_style: Dict[str, Any]) -> List[Dict[s
             if closing != -1:
                 pos = closing
             else:
-                while pos < length and not text[pos].isspace() and text[pos] != "@":
-                    pos += 1
+                buffer.append("@")
+                index += 1
+                continue
             classname = text[start:pos]
             if not classname:
                 handled = False
             else:
+                push_buffer()
                 resolved = classname if prefixless else f"echo-text-{classname}"
                 if resolved not in active_classes:
                     active_classes.append(resolved)
@@ -259,9 +267,6 @@ def _apply_fast_formatting(text: str, base_style: Dict[str, Any]) -> List[Dict[s
         if active_classes:
             empty_entry["class"] = active_classes.copy()
         append_entry(empty_entry)
-
-    if not segments:
-        return [{"text": text, "style": base_style.copy()}]
 
     return segments
 
@@ -396,6 +401,7 @@ def _apply_markdown(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             elif isinstance(base_style, dict):
                 seg_entry["style"] = style_template.copy()
             expanded.append(seg_entry)
+            extra_fields.pop("event", None)
 
     return expanded
 
@@ -439,12 +445,17 @@ def apply_autopause(config: Dict[str, Any], messages: List[Dict[str, Any]]) -> L
 
         buffer: List[str] = []
         length = len(text)
+        event_emitted = False
 
         def flush_buffer() -> None:
+            nonlocal event_emitted
             if not buffer:
                 return
             chunk = "".join(buffer)
             new_entry = _clone_entry(entry)
+            if event_emitted:
+                new_entry.pop("event", None)
+            event_emitted = True
             new_entry["text"] = chunk
             result.append(new_entry)
             buffer.clear()
@@ -503,9 +514,11 @@ def render(config: Dict[str, Any], messages: List[Dict[str, Any]]) -> str:
         if config.get("typewriting") and isinstance(text_value, str) and text_value:
             segments = _tokenize_for_typewrite(text_value)
             if len(segments) > 1:
-                for segment in segments:
+                for segment_index, segment in enumerate(segments):
                     seg_entry = _clone_entry({key: value for key, value in data.items() if key != "text"})
                     seg_entry["text"] = segment
+                    if segment_index:
+                        seg_entry.pop("event", None)
                     typewrite_value = get_typewriting_string(segment, typewriting_scheme)
                     if typewrite_value:
                         seg_entry["typewrite"] = typewrite_value

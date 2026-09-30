@@ -54,6 +54,18 @@ async def main():
                 assert await pages[2].evaluate("config.history.message.latest_message_hide") is False
                 assert await pages[0].evaluate("echo.printSpeedStart") == settings["message.print_speed"]
                 assert await pages[0].evaluate("config.editor.websocket.disable_broadcast") is True
+                await pages[0].evaluate("""() => {
+                    window.eltuiShoutSeen = false;
+                    new MutationObserver(() => {
+                        if (document.querySelector('#echo-live').classList.contains('event-shout')) window.eltuiShoutSeen = true;
+                    }).observe(document.querySelector('#echo-live'), {attributes: true});
+                }""")
+                core.submit("@shout@bFORMAT_BOLD@r @[#66ccff]FORMAT_BLUE@r @rainbowRAINBOW@r @@END")
+                await pages[0].bring_to_front()
+                await pages[0].wait_for_function("document.body.textContent.includes('@END')", polling=100)
+                assert "FORMAT_BOLD" in "".join(await pages[0].locator(".echo-text-bold").all_text_contents())
+                assert "RAINBOW" in "".join(await pages[0].locator(".echo-text-rainbow").all_text_contents())
+                assert await pages[0].evaluate("window.eltuiShoutSeen")
                 editor = await context.new_page()
                 editor.on("pageerror", lambda error: errors.append(error.stack))
                 await editor.goto(f"http://{lan}:{port}/editor.html")

@@ -27,6 +27,7 @@ class Field:
 
 FIELDS = {
     "input.suggestions": Field(True, "命令与短码提示"),
+    "input.format_bar": Field("context", "格式栏显示", ("context", "always", "never")),
     "input.preview": Field(True, "实时格式预览"),
     "input.interrupt_guard": Field(True, "防止 Ctrl+C 退出"),
     "listen.host": Field("127.0.0.1", "监听地址"),

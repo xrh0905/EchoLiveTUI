@@ -21,15 +21,15 @@ def test_parse_message_supports_markdown_and_fast_formatting() -> None:
     assert any(entry.get("style", {}).get("bold") for entry in parsed if entry.get("text") == "强")
     assert any(entry.get("style", {}).get("italic") for entry in parsed if entry.get("text") == "斜")
     assert any(entry.get("style", {}).get("code") for entry in parsed if entry.get("text") == "码")
-    assert any(entry.get("emoji") == "smile" for entry in parsed)
+    assert "@{smile}" in "".join(entry.get("text", "") for entry in parsed)
     assert any("echo-text-warn" in entry.get("class", []) for entry in parsed)
 
 
-def test_parse_message_supports_escaped_at_and_event_token() -> None:
+def test_parse_message_supports_escaped_at_and_editor_strike_code() -> None:
     parsed = parse_message(r"\@字面 @sh喊")
 
     assert parsed[0]["text"].startswith("@字面")
-    assert any(entry.get("event") == "shout" for entry in parsed)
+    assert any(entry.get("text") == "h喊" and entry.get("style", {}).get("strikethrough") for entry in parsed)
 
 
 def test_wire_format_adapts_legacy_emoji_classes_and_speed():
@@ -37,7 +37,7 @@ def test_wire_format_adapts_legacy_emoji_classes_and_speed():
     payload = json.loads(render(config, parse_message("@{smile} @<a>@<b>`code`")))
     message = payload["data"]["messages"][0]
     assert message["data"]["printSpeed"] == 7
-    assert any(p.get("data", {}).get("emoji") == "smile" for p in message["message"])
+    assert not any(p.get("data", {}).get("emoji") for p in message["message"])
     assert all(isinstance(p["class"], str) for p in message["message"] if "class" in p)
 
 

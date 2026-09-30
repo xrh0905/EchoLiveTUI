@@ -19,6 +19,7 @@ from .core import Core
 from .pipeline import quote_symbols
 from .lan import interfaces, editor_url, terminal_qr
 from .signals import InterruptPolicy
+from .editing import SHORTCODES, completion, format_selection, preview
 
 
 class DisplayText(Static):
@@ -62,6 +63,14 @@ class HistoryLog(RichLog, can_focus=False):
 
 
 class ComposerInput(Input):
+    async def _on_key(self, event):
+        if event.key == "shift+enter":
+            event.prevent_default()
+            event.stop()
+            self.post_message(self.Multiline(self.value))
+            return
+        await super()._on_key(event)
+
     def on_blur(self):
         self.app.core.cancel_typing()
 
@@ -78,6 +87,53 @@ class ComposerInput(Input):
             event.stop()
         else:
             super()._on_paste(event)
+
+
+class FormatLink(DisplayText, can_focus=False):
+    class Apply(Message):
+        def __init__(self, code):
+            super().__init__()
+            self.code = code
+
+    def on_click(self, event):
+        event.stop()
+        self.post_message(self.Apply(self.name))
+
+
+class FormatBar(Horizontal):
+    def compose(self):
+        for label, code in (("B 粗体", "@b"), ("I 斜体", "@i"), ("U 下划线", "@u"), ("S 删除线", "@s"), ("清除格式", "@r"), ("A+ 放大", "@+"), ("A− 缩小", "@-"), ("蓝色", "@[#66ccff]"), ("喊叫", "@shout"), ("彩虹", "@rainbow")):
+            link = FormatLink(label, name=code)
+            link.tooltip = code + " · 应用于选中文字，未选中时插入短码"
+            yield link
+
+    def on_mount(self):
+        self.refresh_visibility()
+        self.set_interval(.1, self.refresh_visibility)
+
+    def refresh_visibility(self):
+        mode = self.app.core.settings["input.format_bar"]
+        if isinstance(self.screen, ComposeScreen):
+            editor = self.screen.query_one(TextArea)
+            row, column = editor.cursor_location
+            cursor = sum(len(line) + 1 for line in editor.text.split("\n")[:row]) + column
+            text = editor.text
+        else:
+            editor = self.app.query_one("#entry", Input)
+            text, cursor = editor.value, editor.cursor_position
+        _, start = completion(text, cursor)
+        self.display = mode == "always" or (mode == "context" and bool(editor.selected_text or start < cursor))
+
+
+class ComposeArea(TextArea):
+    BINDINGS = [Binding("ctrl+space", "complete_shortcode", show=False, priority=True)]
+
+    def action_complete_shortcode(self):
+        row, column = self.cursor_location
+        offset = sum(len(line) + 1 for line in self.text.split("\n")[:row]) + column
+        choices, start = completion(self.text, offset)
+        if choices and self.app.core.settings["input.suggestions"]:
+            self.replace(choices[0], (row, column - (offset - start)), (row, column), maintain_selection_offset=False)
 
 
 class SettingsScreen(ModalScreen):
@@ -115,7 +171,8 @@ class SettingsScreen(ModalScreen):
                         elif isinstance(field.default, bool):
                             yield Select([("关闭", False), ("开启", True)], value=value, allow_blank=False, id=wid, name=key)
                         elif field.choices:
-                            yield Select([(x, x) for x in field.choices], value=value, allow_blank=False, id=wid, name=key)
+                            labels = {"context": "选区 / 短码时显示", "always": "始终显示", "never": "始终隐藏"} if key == "input.format_bar" else {}
+                            yield Select([(labels.get(x, x), x) for x in field.choices], value=value, allow_blank=False, id=wid, name=key)
                         else:
                             yield Input(str(value), id=wid, name=key, type="integer" if isinstance(field.default, int) else "text")
             yield EndpointPanel(id="endpoint-panel")
@@ -237,7 +294,10 @@ class ComposeScreen(ModalScreen):
     def compose(self):
         with Vertical(id="dialog"):
             yield Label("多行消息 · Enter 换行 · Tab 到发送按钮", classes="title")
-            yield TextArea(self.app.core.compose_draft, id="multiline", tab_behavior="focus")
+            yield ComposeArea(self.app.core.compose_draft, id="multiline", tab_behavior="focus")
+            yield Static("", id="compose-suggestions", markup=False)
+            yield FormatBar()
+            yield Static("", id="compose-preview", markup=False)
             yield Static("", id="compose-error", markup=False)
             with Horizontal(classes="actions"):
                 yield Button("发送", id="send", variant="primary")
@@ -245,11 +305,20 @@ class ComposeScreen(ModalScreen):
 
     def on_mount(self):
         self.query_one(TextArea).focus()
+        self.query_one("#compose-preview", Static).update(preview(self.app.core.compose_draft, self.app.core.settings))
+        self.query_one("#compose-preview").display = self.app.core.settings["input.preview"]
 
     @on(TextArea.Changed)
     def changed(self, event):
         self.app.core.compose_draft = event.text_area.text
         self.app.core.input_changed(event.text_area.text, literal=True)
+        self.query_one("#compose-preview", Static).update(preview(event.text_area.text, self.app.core.settings))
+        row, column = event.text_area.cursor_location
+        offset = sum(len(line) + 1 for line in event.text_area.text.split("\n")[:row]) + column
+        choices, _ = completion(event.text_area.text, offset)
+        hint = self.query_one("#compose-suggestions", Static)
+        hint.display = bool(choices) and self.app.core.settings["input.suggestions"]
+        hint.update("Ctrl+Space 补全 · " + "  ".join(code + " " + SHORTCODES[code] for code in choices))
 
     @on(Button.Pressed)
     def button(self, event):
@@ -482,6 +551,12 @@ class EchoApp(App, inherit_bindings=False):
     ActionLink:hover { background: #3f827b; }
     #error { height: auto; max-height: 2; color: #ffaaa0; padding: 0 1; }
     #suggestions { height: auto; max-height: 3; padding: 0 1; color: #95e4d0; }
+    FormatBar { height: 2; layout: grid; grid-size: 5 2; grid-gutter: 0 1; background: #192b37; }
+    FormatLink { width: 1fr; height: 1; color: #95e4d0; }
+    FormatLink:hover { background: #3f827b; text-style: bold; }
+    #preview { height: auto; max-height: 3; padding: 0 1; }
+    #compose-preview { height: auto; max-height: 6; }
+    #compose-suggestions { height: auto; max-height: 3; }
     ModalScreen { align: center middle; background: #000000 65%; }
     #dialog { width: 94%; max-width: 110; height: 92%; padding: 1 2; border: solid #3f827b; background: #152530; }
     .title { height: 2; text-style: bold; }
@@ -543,6 +618,8 @@ class EchoApp(App, inherit_bindings=False):
         yield Static("", id="error", markup=False)
         yield DisplayText("", id="context", markup=False)
         yield Static("", id="suggestions", markup=False)
+        yield Static("", id="preview", markup=False)
+        yield FormatBar()
         yield ComposerInput(placeholder="输入消息，或 /help", id="entry")
         yield DisplayText("", id="enhancements", markup=False)
         with Horizontal(id="footer"):
@@ -582,33 +659,61 @@ class EchoApp(App, inherit_bindings=False):
         self.query_one("#top", Static).update(f"EchoLiveTUI   服务{service} · 字幕端 {sum(p.profile.role == 'live' for p in core.hub.peers.values())}")
         self.query_one("#route", Static).update(f"发送到 {names[:max(10, self.size.width - 34)]} · {'本地托管' if core.server.hosting.root else '独立 WS'} · OSC {'错误' if core.osc_error else '开' if s['osc.enable'] else '关'}")
         entry = self.query_one("#entry", Input)
+        preview_key = (entry.value, tuple(s.values.items()))
+        if getattr(self, "preview_key", None) != preview_key:
+            self.preview_key = preview_key
+            display = self.query_one("#preview", Static)
+            display.display = s["input.preview"] and bool(entry.value) and (not entry.value.startswith("/") or entry.value.startswith("//"))
+            if display.display:
+                display.update(preview(entry.value[1:] if entry.value.startswith("//") else entry.value, s))
         self.query_one("#context", Static).update(f"{s['message.username']} → {names[:30]} · 原文 {len(entry.value)} 字")
         quote = "".join(quote_symbols(s)) if s["message.quote"] else "关"
         paren = "仅下一条" if core.paren_once else "【】" if s["message.username_brackets"] else "关"
         basic = f"引号{quote[:8]} · 姓名框{paren}"
         more = f" · 后缀{'开' if s['message.suffix'] else '关'} · 模拟打字 {s['message.typewriting_scheme'] if s['message.typewriting'] else '关'} · {s['message.print_speed']}ms · 停顿{'开' if s['message.autopause'] else '关'}"
         self.query_one("#enhancements", Static).update(basic + (more if self.size.width >= 80 else " · 增强 +4"))
-        self.query_one("#hints", Static).update(("Tab/↑↓ 选择 · Enter 补全 · Esc 关闭" if self.completing else "Enter 发送 · / 命令") + f"  输入提示：{core.typing_state}")
+        self.query_one("#hints", Static).update(("Tab/↑↓ 选择 · Enter 补全 · Esc 关闭" if self.completing else "Enter 发送 · Shift+Enter 多行") + f"  输入提示：{core.typing_state}")
 
     @on(Input.Changed, "#entry")
     def input_changed(self, event):
         self.core.input_changed(event.value)
-        prefix = event.value[1:]
-        self.candidates = ["/" + name for name in HELP if name.startswith(prefix)] if event.value.startswith("/") and " " not in event.value and not event.value.startswith("//") else []
+        self.refresh_candidates(event.input)
+        self.refresh_status()
+
+    def refresh_candidates(self, entry):
+        self.completion_state = (entry.value, entry.cursor_position, entry.selected_text)
+        prefix = entry.value[1:entry.cursor_position]
+        self.candidates = ["/" + name for name in HELP if name.startswith(prefix)] if entry.value.startswith("/") and " " not in entry.value and not entry.value.startswith("//") else []
+        self.completion_start = 0
+        if not self.candidates:
+            self.candidates, self.completion_start = completion(entry.value, entry.cursor_position)
+        if not self.core.settings["input.suggestions"] or entry.selected_text:
+            self.candidates = []
         self.candidate_index = 0
         self.completing = False
         self.show_candidates()
-        self.refresh_status()
 
     def show_candidates(self):
         widget = self.query_one("#suggestions", Static)
         widget.display = bool(self.candidates)
-        widget.update("  ".join(("›" if self.completing and i == self.candidate_index else "") + name for i, name in enumerate(self.candidates[:8])))
+        start = max(0, self.candidate_index - 3) if self.completing else 0
+        widget.update("  ".join(("›" if self.completing and i == self.candidate_index else "") + name + (" " + SHORTCODES[name] if name in SHORTCODES else "") for i, name in enumerate(self.candidates) if start <= i < start + 7))
+
+    def accept_completion(self, entry):
+        code = self.candidates[self.candidate_index]
+        start = self.completion_start
+        suffix = " " if code.startswith("/") else ""
+        end = entry.cursor_position
+        entry.replace(code + suffix, start, end)
+        entry.cursor_position = start + len(code + suffix)
+        self.candidates, self.completing = [], False
 
     async def on_key(self, event):
         if self.screen is not self.screen_stack[0] or self.focused is not self.query_one("#entry"):
             return
         entry = self.query_one("#entry", Input)
+        if getattr(self, "completion_state", None) != (entry.value, entry.cursor_position, entry.selected_text):
+            self.refresh_candidates(entry)
         if self.candidates and event.key in {"tab", "up", "down", "escape", "enter"}:
             if event.key == "enter" and not self.completing:
                 return
@@ -617,9 +722,7 @@ class EchoApp(App, inherit_bindings=False):
             if event.key == "escape":
                 self.candidates, self.completing = [], False
             elif event.key == "enter":
-                entry.value = self.candidates[self.candidate_index] + " "
-                entry.cursor_position = len(entry.value)
-                self.candidates, self.completing = [], False
+                self.accept_completion(entry)
             else:
                 self.candidate_index = (self.candidate_index + (-1 if event.key == "up" else 1)) % len(self.candidates) if self.completing else 0
                 self.completing = True
@@ -636,8 +739,7 @@ class EchoApp(App, inherit_bindings=False):
     @on(Input.Submitted, "#entry")
     async def submitted(self, event):
         if self.completing:
-            event.input.value = self.candidates[self.candidate_index] + " "
-            self.completing = False
+            self.accept_completion(event.input)
             return
         text = event.value
         try:
@@ -684,12 +786,50 @@ class EchoApp(App, inherit_bindings=False):
             self.query_one("#entry").focus(scroll_visible=False)
 
     def action_interrupt(self):
+        if isinstance(self.focused, (Input, TextArea)) and self.focused.selected_text:
+            self.copy_to_clipboard(self.focused.selected_text)
+            return
         selected = self.screen.get_selected_text()
         if selected:
             self.copy_to_clipboard(selected)
             return
         if not self.core.settings["input.interrupt_guard"]:
             self.exit()
+
+    @on(FormatLink.Apply)
+    def apply_format(self, event):
+        event.stop()
+        if isinstance(self.screen, ComposeScreen):
+            area = self.screen.query_one(TextArea)
+            start, end = area.selection.start, area.selection.end
+            lines = area.text.split("\n")
+            offset = lambda position: sum(len(line) + 1 for line in lines[:position[0]]) + position[1]
+            lo, hi = sorted((offset(start), offset(end)))
+            try:
+                updated, selected_start, selected_end = format_selection(area.text, lo, hi, event.code)
+            except ValueError as exc:
+                self.screen.query_one("#compose-error", Static).update(str(exc))
+                return
+            length = len(updated) - len(area.text) + hi - lo
+            area.replace(updated[lo:lo + length], *sorted((start, end)))
+            from textual.document._document import Selection as AreaSelection
+            def location(index):
+                prefix = updated[:index]
+                return prefix.count("\n"), len(prefix.rsplit("\n", 1)[-1])
+            area.selection = AreaSelection(location(selected_start), location(selected_end))
+            area.focus()
+        else:
+            entry = self.query_one("#entry", Input)
+            try:
+                updated, start, end = format_selection(entry.value, *entry.selection, event.code)
+            except ValueError as exc:
+                self.query_one("#error", Static).update(str(exc))
+                self.query_one("#error").display = True
+                return
+            from textual.widgets._input import Selection
+            entry.value = updated
+            entry.selection = Selection(start, end)
+            entry.focus()
 
     async def on_unmount(self):
         if hasattr(self, "interrupt_policy"):
