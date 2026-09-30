@@ -106,11 +106,11 @@ python scripts/build.py --mode standalone
 python scripts/build.py --mode onefile
 ```
 
-需要 Python 3.12 x64 和 Visual Studio C++ 工具链。产物位于 `dist`，含 ZIP 与 SHA256；打包后自动运行 `--self-test` 验证 TUI、词典、二维码、HTTP 和 WS，并在独立隐藏控制台验证真实 Ctrl+C 的拦截和退出。解压后将整个 standalone 文件夹放在任意位置，从 Echo Live 工作目录运行其中的 EXE；onefile 可直接放入 Echo Live 目录运行。两者均按启动工作目录识别资源。
+需要 Python 3.12 x64 和 Visual Studio C++ 工具链。产物位于 `dist`；onefile 直接提供 EXE 与 SHA256，不额外套 ZIP 或目录；可选本地 standalone 提供平铺 ZIP；打包后自动运行 `--self-test` 验证 TUI、词典、二维码、HTTP 和 WS，并在独立隐藏控制台验证真实 Ctrl+C 的拦截和退出。解压后将整个 standalone 文件夹放在任意位置，从 Echo Live 工作目录运行其中的 EXE；onefile 可直接放入 Echo Live 目录运行。两者均按启动工作目录识别资源。
 
 单文件使用 `--onefile-child-grace-time=infinity`，避免 Nuitka 父进程在 Ctrl+C 后强行结束启用了拦截的子进程。`/nocc` 动态控制 Ctrl+C，SIGTERM 仍请求退出。底栏「退出」可正常结束。
 
-GitHub Actions 在提交和 PR 上运行测试；手动运行打包工作流产生两个 Windows 包，推送 `v*` 标签时，全部测试与打包自检通过后发布 GitHub Release。版本标签应与 pyproject.toml 的版本一致。Echo Live 资源和个人配置不包含在包中。
+GitHub Actions 在提交和 PR 上运行测试；手动运行打包工作流只产生 Windows onefile EXE 和 SHA256，推送 `v*` 标签时，全部测试与打包自检通过后发布 GitHub Release；带 `-alpha` / `-beta` 等后缀的标签发布为 Pre-Release。版本标签应与 pyproject.toml 的版本一致。Echo Live 资源和个人配置不包含在包中。
 
 开发验证可执行 `python scripts/download-echolive.py` 下载上游最新发布版（不改动工作目录下已有的 Echo Live），再用 `scripts/browser-smoke.py 路径` 验证融合模式与 LAN editor。
 

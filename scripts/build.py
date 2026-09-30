@@ -11,7 +11,7 @@ import zipfile
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=("standalone", "onefile"), default="standalone")
+    parser.add_argument("--mode", choices=("standalone", "onefile"), default="onefile")
     parser.add_argument("--jobs", type=int, default=4)
     args = parser.parse_args()
     root = Path(__file__).resolve().parent.parent
@@ -32,15 +32,22 @@ def main():
     release = root / "dist"
     release.mkdir(exist_ok=True)
     name = f"EchoLiveTUI-{__version__}-windows-x64-{args.mode}"
+    if args.mode == "onefile":
+        artifact = release / f"{name}.exe"
+        shutil.copy2(executable, artifact)
+        checksum = hashlib.sha256(artifact.read_bytes()).hexdigest()
+        artifact.with_suffix(".exe.sha256").write_text(f"{checksum}  {artifact.name}\n", encoding="ascii")
+        print(json.dumps({"artifact": str(artifact), "sha256": checksum}, indent=2))
+        return
     bundle = release / f"{name}.zip"
     with zipfile.ZipFile(bundle, "w", zipfile.ZIP_DEFLATED) as archive:
         files = executable.parent.rglob("*") if args.mode == "standalone" else [executable]
         for file in files:
             if file.is_file():
-                archive.write(file, f"{name}/{file.relative_to(executable.parent).as_posix()}")
+                archive.write(file, file.relative_to(executable.parent).as_posix())
         for filename in ("README.md", "LICENSE", "THIRD_PARTY_NOTICES.md"):
             if (root / filename).is_file():
-                archive.write(root / filename, f"{name}/{filename}")
+                archive.write(root / filename, filename)
     checksum = hashlib.sha256(bundle.read_bytes()).hexdigest()
     bundle.with_suffix(".zip.sha256").write_text(f"{checksum}  {bundle.name}\n", encoding="ascii")
     print(json.dumps({"archive": str(bundle), "executable": str(executable), "sha256": checksum}, indent=2))

@@ -21,20 +21,19 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     needs: test
     runs-on: windows-2022
-    strategy:
-      matrix:
-        mode: [standalone, onefile]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - run: python -m pip install -e '.[build]'
-      - run: python scripts/build.py --mode ${{ matrix.mode }} --jobs 4
+      - run: python scripts/build.py --mode onefile --jobs 4
       - uses: actions/upload-artifact@v7
         with:
-          name: windows-${{ matrix.mode }}
-          path: dist/*
+          name: windows-onefile
+          path: dist/*.exe*
+          compression-level: 0
+          if-no-files-found: error
   release:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: package
@@ -48,5 +47,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh run download "$GITHUB_RUN_ID" --pattern 'windows-*' --dir artifacts
-          gh release create "$GITHUB_REF_NAME" artifacts/windows-*/* --verify-tag --generate-notes --title "EchoLiveTUI $GITHUB_REF_NAME"
+          gh run download "$GITHUB_RUN_ID" --name windows-onefile --dir artifacts
+          prerelease=()
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then prerelease=(--prerelease); fi
+          gh release create "$GITHUB_REF_NAME" artifacts/*.exe artifacts/*.sha256 --verify-tag --generate-notes --title "EchoLiveTUI $GITHUB_REF_NAME" "${prerelease[@]}"
