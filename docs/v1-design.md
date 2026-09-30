@@ -1,3 +1,5 @@
+> 阶段二更新：本轮已实现 TUI 文本选区、短码补全和实时格式预览。表情、图片、Companion、版本托管均后置。默认 INFO / 输入状态开启，托管只识别当前目录及单级 EchoLive 子目录。下文第一版范围保留为历史设计，当前行为以 README 为准。
+
 # EchoLiveTUI 第一版设计
 
 状态：第一版已实现并持续验证。目标仓库：[xrh0905/EchoLiveTUI](https://github.com/xrh0905/EchoLiveTUI)。运行入口与实际验证见 [README](../README.md)。
