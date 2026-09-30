@@ -722,9 +722,7 @@ class EchoApp(App, inherit_bindings=False):
         entry = self.query_one("#entry", Input)
         if getattr(self, "completion_state", None) != (entry.value, entry.cursor_position, entry.selected_text):
             self.refresh_candidates(entry)
-        if self.candidates and event.key in {"tab", "up", "down", "escape", "enter"}:
-            if event.key == "enter" and not self.completing:
-                return
+        if self.candidates and (event.key in {"tab", "escape"} or (self.completing and event.key in {"up", "down", "enter"})):
             event.prevent_default()
             event.stop()
             if event.key == "escape":

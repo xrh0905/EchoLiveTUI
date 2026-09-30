@@ -151,3 +151,27 @@ async def test_compose_multiline_format_keeps_selected_text(tmp_path):
         await pilot.pause()
         assert area.text == "前@b面\n选中@r\n后面"
         assert area.selected_text == "面\n选中"
+
+
+async def test_history_commands_do_not_capture_arrows_until_tab(tmp_path):
+    app = EchoApp(Settings(tmp_path / "s.yaml"), tmp_path, start_server=False)
+    async with app.run_test() as pilot:
+        entry = app.query_one("#entry", Input)
+        app.input_history = ["earlier message", "/status", "/help"]
+        app.history_index = len(app.input_history)
+        entry.value = "current draft"
+        await pilot.press("up")
+        assert entry.value == "/help" and not app.completing
+        await pilot.press("up")
+        assert entry.value == "/status" and not app.completing
+        await pilot.press("up")
+        assert entry.value == "earlier message"
+        await pilot.press("down", "down", "down")
+        assert entry.value == "current draft"
+        await pilot.press("up", "tab")
+        assert app.completing
+        index = app.history_index
+        await pilot.press("up", "down")
+        assert app.history_index == index and entry.value == "/help"
+        await pilot.press("escape", "up")
+        assert not app.completing and entry.value == "/status"
