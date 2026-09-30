@@ -26,6 +26,8 @@ class Field:
 
 
 FIELDS = {
+    "input.suggestions": Field(True, "命令与短码提示"),
+    "input.preview": Field(True, "实时格式预览"),
     "input.interrupt_guard": Field(True, "防止 Ctrl+C 退出"),
     "listen.host": Field("127.0.0.1", "监听地址"),
     "listen.port": Field(3000, "监听端口", minimum=1, maximum=65535),
@@ -46,8 +48,8 @@ FIELDS = {
     "message.autopause": Field(False, "自动停顿"),
     "message.autopausestr": Field(",，.。;；:：!！", "停顿字符"),
     "message.autopausetime": Field(10, "停顿时长", minimum=0, maximum=60000),
-    "typing.enable": Field(False, "输入提示"),
-    "log.level": Field("error", "日志级别", ("error", "info", "debug")),
+    "typing.enable": Field(True, "输入提示"),
+    "log.level": Field("info", "日志级别", ("error", "warn", "info", "debug")),
     "history.hide_latest": Field(False, "暂存最新一条历史"),
     "osc.enable": Field(False, "VRChat OSC"),
     "osc.host": Field("127.0.0.1", "OSC 地址"),

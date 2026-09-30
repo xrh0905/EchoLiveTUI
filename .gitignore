@@ -8,4 +8,5 @@ build/
 echolivetui.yaml
 .artifacts/
 echo-live-*/
+EchoLive/
 

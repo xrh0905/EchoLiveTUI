@@ -108,14 +108,14 @@ class Core:
                 osc_sent, self.osc_error = True, ""
             except Exception as exc:
                 self.osc_error = str(exc)
-                self.report(f"OSC 发送失败：{exc}")
+                self.hub.log(f"OSC 发送失败：{exc}", "warn")
         if not count and not history_count and not osc_sent:
             raise ValueError("OSC 发送失败，草稿已保留")
         self.paren_once = False
         self.cancel_typing()
         result = f"{self.settings['message.username']}：{text}"
         self.report(result)
-        self.hub.log(f"已接受：字幕 {count} · 历史 {history_count}" + (" · OSC 已发送" if osc_sent else ""))
+        self.hub.log(f"已接受：字幕 {count} · 历史 {history_count}" + (" · OSC 已发送" if osc_sent else ""), "debug")
         return result
 
     def cancel_typing(self):

@@ -55,11 +55,12 @@ async def test_hide_latest_is_hub_owned_and_flushable(tmp_path):
     assert not core.hub.history.pending
 
 
-async def test_default_logs_only_write_failures(tmp_path):
+async def test_default_info_reports_connections_and_warn_failures(tmp_path):
     core, peer, reports = core_with_peer(tmp_path, fail=True)
     core.hub.log("connected", "info")
     core.hub.log("packet", "debug")
-    assert reports == []
+    assert reports == ["connected"]
+    reports.clear()
     peer.enqueue({"action": "echo_printing"}, fast=True)
     await peer.write_loop(core.hub.log)
     assert len(reports) == 1 and "写入失败" in reports[0]
@@ -94,13 +95,13 @@ async def test_server_message_records_tui_and_history_once_without_live(tmp_path
     core, history, reports = core_with_peer(tmp_path)
     try:
         await core.hub.receive(Socket(), {"action": "message_data", "from": {"uuid": "editor", "type": "server", "name": "Editor"}, "target": "@__live", "data": {"username": "Remote", "messages": [{"message": "Hello"}]}})
-        assert reports == ["Remote：Hello"]
+        assert reports.count("Remote：Hello") == 1
         frame, _ = history.control.get_nowait()
         assert frame["action"] == "echo_printing"
         assert frame["data"] == {"username": "Remote", "message": "Hello"}
         await core.hub.receive(Socket(), {"action": "echo_printing", "from": {"uuid": "live", "type": "live"}, "data": {"username": "Remote", "message": "Hello"}})
         assert history.control.empty()
-        assert reports == ["Remote：Hello"]
+        assert reports.count("Remote：Hello") == 1
     finally:
         await core.close()
 
@@ -118,7 +119,7 @@ async def test_heartbeat_retargets_all_servers_only(tmp_path, role):
             received, _ = observer.control.get_nowait()
             assert received == {**packet, "target": observer.profile.uuid}
         assert history.control.empty()
-        assert reports == []
+        assert len(reports) == 1 and "连接：" in reports[0]
         assert packet["target"] == "@__ws_server"
     finally:
         await core.close()

@@ -51,9 +51,9 @@ class Peer:
                     continue
                 await asyncio.wait_for(self.ws.send_json(envelope), 10)
                 if envelope["action"] in {"message_data", "echo_printing"}:
-                    report(f"已写入：{self.profile.name}", "info")
+                    report(f"已写入：{self.profile.name}", "debug")
         except (ConnectionError, RuntimeError, TimeoutError, OSError) as exc:
-            report(f"写入失败 {self.profile.name}：{exc}", "error")
+            report(f"写入失败 {self.profile.name}：{exc}", "warn")
             await self.ws.close()
         finally:
             self.closed = True
@@ -78,7 +78,7 @@ class Hub:
         self.history = HistoryDelivery(self)
 
     def log(self, text, level="info"):
-        levels = {"error": 0, "info": 1, "debug": 2}
+        levels = {"error": 0, "warn": 1, "info": 2, "debug": 3}
         if levels[level] <= levels[self.settings["log.level"]]:
             self.report(text)
 
@@ -108,12 +108,14 @@ class Hub:
             peer = Peer(ws, Profile(uid, ip=ip))
             self.peers[uid] = peer
             peer.worker = asyncio.create_task(peer.write_loop(self.log))
-            self.log(f"连接：{uid}")
+
         if peer.observed:
             peer.profile = copy.deepcopy(peer.observed)
         peer.profile.identify(envelope, **(metadata or {}))
         peer.observed = copy.deepcopy(peer.profile)
         self.apply_override(peer)
+        if not existing or replaced:
+            self.log(f"连接：{peer.profile.name} · {peer.profile.role} · {ip}")
         if replaced:
             await replaced.close()
         return peer
@@ -157,7 +159,7 @@ class Hub:
                 if dest.profile.role == "server" and not dest.closed:
                     forwarded = {**envelope, "target": dest.profile.uuid}
                     if not dest.enqueue(forwarded, fast=True):
-                        self.log(f"写入失败：{dest.profile.name} 队列已满", "error")
+                        self.log(f"写入失败：{dest.profile.name} 队列已满", "warn")
             return peer
         if envelope.get("target") == "@__ws_server":
             return peer
@@ -189,7 +191,7 @@ class Hub:
                 accepted = False
             if accepted:
                 if not dest.enqueue(envelope, fast=action != "message_data"):
-                    self.log(f"写入失败：{profile.name} 队列已满", "error")
+                    self.log(f"写入失败：{profile.name} 队列已满", "warn")
         if action == "close":
             await self.disconnect(peer)
         return peer

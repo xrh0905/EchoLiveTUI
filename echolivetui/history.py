@@ -55,7 +55,7 @@ class HistoryDelivery:
     def send(self, peer, entry):
         envelope = self.hub.sender.envelope("echo_printing", {"username": entry.username, "message": entry.message}, peer.profile.uuid)
         if not peer.enqueue(envelope, fast=True):
-            self.hub.log(f"历史写入失败：{peer.profile.name} 队列已满", "error")
+            self.hub.log(f"历史写入失败：{peer.profile.name} 队列已满", "warn")
 
     def flush(self):
         for uid, entry in list(self.pending.items()):

@@ -15,7 +15,7 @@ ASSET_EXTENSIONS = {".html", ".js", ".css", ".json", ".svg", ".png", ".jpg", ".j
 class Hosting:
     def __init__(self, cwd: Path, token: str, settings):
         root = cwd.resolve()
-        self.root = root if all((root / p).is_file() for p in REQUIRED) else None
+        self.root = next((candidate for candidate in (root, root / "EchoLive") if all((candidate / p).is_file() for p in REQUIRED)), None)
         self.token, self.settings = token, settings
         self.version = None
         if self.root and (root / "app.js").is_file():
