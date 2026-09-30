@@ -47,6 +47,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "Release already published; preserving its verified assets."
+            exit 0
+          fi
           gh run download "$GITHUB_RUN_ID" --name windows-onefile --dir artifacts
           prerelease=()
           if [[ "$GITHUB_REF_NAME" == *-* ]]; then prerelease=(--prerelease); fi
