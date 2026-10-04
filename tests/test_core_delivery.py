@@ -29,7 +29,7 @@ def test_osc_once_per_submission_not_per_live(tmp_path, monkeypatch):
     core.submit("**text**")
     assert len(calls) == 1
     assert calls[0][0] == "/chatbox/input"
-    assert calls[0][1] == ['"text"', True]
+    assert calls[0][1] == ['「text」', True]
     assert all(peer.queue.qsize() == 1 for peer in core.hub.peers.values())
 
 

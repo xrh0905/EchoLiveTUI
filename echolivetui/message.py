@@ -10,6 +10,7 @@ from typing import Any, Dict, Iterable, List, Optional
 import jieba
 from markdown_it import MarkdownIt
 from pypinyin import Style, lazy_pinyin
+from .symbols import bracket_symbols
 
 ALPHABETIC = set(string.ascii_letters)
 DEFAULT_PRINT_SPEED = 30
@@ -29,11 +30,10 @@ def format_username(config: Dict[str, Any]) -> str:
         return username
 
     inner = username.strip()
-    if inner.startswith("【") and inner.endswith("】") and len(inner) >= 2:
+    left, right = bracket_symbols(config)
+    if left and right and inner.startswith(left) and inner.endswith(right) and len(inner) >= len(left) + len(right):
         return inner
-    if inner:
-        return f"【{inner}】"
-    return "【】"
+    return left + inner + right
 
 
 def normalize_typewriting_scheme(scheme: str | None) -> str:

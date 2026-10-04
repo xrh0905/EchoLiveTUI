@@ -29,6 +29,10 @@ async def main():
             async with async_playwright() as pw:
                 browser = await pw.chromium.launch(channel="msedge", headless=True, args=["--disable-background-timer-throttling", "--disable-renderer-backgrounding", "--disable-backgrounding-occluded-windows"])
                 context = await browser.new_context()
+                if core.server.hosting.version == "1.6.6":
+                    # Old editor's first-run tutorial races translation loading;
+                    # exercise sending with onboarding already completed.
+                    await context.add_init_script("localStorage.setItem('echolive', JSON.stringify({data_version: 1, tutorial: {editor_overview: true}}));")
                 pages = []
                 for filename in ("live.html", "live.html", "history.html"):
                     page = await context.new_page()
@@ -43,7 +47,11 @@ async def main():
                     await asyncio.sleep(.1)
                 assert len(core.hub.targets()) == 2, [(p.profile.role, p.profile.name) for p in core.hub.peers.values()]
                 assert all(p.profile.version == core.server.hosting.version for p in core.hub.peers.values())
-                core.submit("TUI")
+                playback = []
+                core.submit("TUI", playback=playback)
+                await core.wait_for_printing(playback)
+                assert len(playback) == 2 and all(receipt.finished.is_set() for receipt in playback)
+                assert all([await page.evaluate("echo.state === 'stop'") for page in pages[:2]])
                 for page in pages:
                     await page.bring_to_front()
                     await page.wait_for_function("document.body.textContent.includes('TUI')", polling=100)
@@ -69,7 +77,9 @@ async def main():
                 editor = await context.new_page()
                 editor.on("pageerror", lambda error: errors.append(error.stack))
                 await editor.goto(f"http://{lan}:{port}/editor.html")
-                await editor.locator('.fh-window-controller-button[data-controller-id="no"]').click()
+                close_prompt = editor.locator('.fh-window-controller-button[data-controller-id="no"]')
+                if await close_prompt.count():
+                    await close_prompt.click()
                 await editor.locator("#ptext-content").fill("LAN_EDITOR_TEST")
                 await editor.locator("#ptext-btn-send").click()
                 for page in pages:

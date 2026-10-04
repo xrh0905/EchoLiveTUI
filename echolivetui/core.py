@@ -12,6 +12,8 @@ from .pipeline import prepare
 from .server import Server
 from .addresses import first_ipv4, hosted_notice
 from .lan import choose_address, editor_url
+from .capabilities import Capabilities
+from .playback import DeliveryUnavailable
 
 
 class Core:
@@ -19,6 +21,7 @@ class Core:
         self.settings, self.report = settings, report
         self.hub = Hub(settings, report)
         self.server = Server(self.hub, cwd)
+        self.capabilities = Capabilities.HAS_ECHO_LIVE if self.server.hosting.root else Capabilities.NONE
         self.paren_once = False
         self.typing_task = None
         self.last_typing = 0.0
@@ -94,13 +97,17 @@ class Core:
         routing.update(changes)
         self.settings.save(routing=routing)
 
-    def submit(self, text):
+    @property
+    def has_output(self):
+        return bool(self.hub.targets() or self.hub.history.receivers() or self.settings["osc.enable"])
+
+    def submit(self, text, *, playback=None):
         prepared = prepare(text, self.settings, self.paren_once)
         targets = self.hub.targets()
         history_count = len(self.hub.history.receivers())
         if not targets and not history_count and not self.settings["osc.enable"]:
-            raise ValueError("没有可发送的字幕端，草稿已保留；请连接或选择端点")
-        count = self.hub.broadcast(prepared.data, prepared.delay)
+            raise DeliveryUnavailable("没有可发送的字幕端，草稿已保留；请连接或选择端点")
+        count = self.hub.broadcast(prepared.data, prepared.delay, playback=playback)
         osc_sent = False
         if self.settings["osc.enable"]:
             try:
@@ -117,6 +124,17 @@ class Core:
         self.report(result)
         self.hub.log(f"已接受：字幕 {count} · 历史 {history_count}" + (" · OSC 已发送" if osc_sent else ""), "debug")
         return result
+
+    async def wait_for_printing(self, receipts):
+        if not receipts:
+            return time.monotonic()
+        tasks = [asyncio.create_task(receipt.wait()) for receipt in receipts]
+        try:
+            return max(await asyncio.gather(*tasks))
+        finally:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     def cancel_typing(self):
         if self.typing_task:

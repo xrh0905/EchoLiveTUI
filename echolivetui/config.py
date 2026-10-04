@@ -37,22 +37,26 @@ FIELDS = {
     "lan.host": Field("", "局域网 IPv4（留空自动选择）"),
     "lan.typewriting": Field(True, "LAN 入站模拟打字"),
     "message.username": Field("Someone", "说话人"),
-    "message.username_brackets": Field(True, "姓名括号【】"),
+    "message.username_brackets": Field(True, "姓名括号"),
+    "message.username_bracket_style": Field("square", "姓名括号样式", ("square", "round", "corner", "custom")),
+    "message.username_bracket_open": Field("【", "左姓名括号"),
+    "message.username_bracket_close": Field("】", "右姓名括号"),
     "message.quote": Field(True, "引号"),
-    "message.quote_style": Field("en", "引号样式", ("en", "cn", "jp", "custom")),
-    "message.quote_open": Field("", "自定义左引号"),
-    "message.quote_close": Field("", "自定义右引号"),
+    "message.quote_style": Field("jp", "引号样式", ("en", "cn", "jp", "custom")),
+    "message.quote_open": Field("「", "左引号"),
+    "message.quote_close": Field("」", "右引号"),
     "message.suffix": Field(False, "后缀"),
     "message.suffix_value": Field("喵", "后缀内容"),
     "message.typewriting": Field(True, "模拟打字"),
     "message.typewriting_scheme": Field("pinyin", "模拟打字方案", ("pinyin", "zhuyin")),
-    "message.print_speed": Field(10, "打印间隔 ms", minimum=1, maximum=60000),
+    "message.print_speed": Field(20, "打印间隔 ms", minimum=1, maximum=60000),
     "message.autopause": Field(False, "自动停顿"),
     "message.autopausestr": Field(",，.。;；:：!！", "停顿字符"),
-    "message.autopausetime": Field(10, "停顿时长", minimum=0, maximum=60000),
+    "message.autopausetime": Field(10, "停顿时长（打印步数）", minimum=0, maximum=60000),
     "typing.enable": Field(True, "输入提示"),
     "log.level": Field("info", "日志级别", ("error", "warn", "info", "debug")),
     "history.hide_latest": Field(False, "暂存最新一条历史"),
+    "history.max_entries": Field(500, "TUI 历史保留条目", minimum=1, maximum=10000),
     "osc.enable": Field(False, "VRChat OSC"),
     "osc.host": Field("127.0.0.1", "OSC 地址"),
     "osc.port": Field(9000, "OSC 端口", minimum=1, maximum=65535),
@@ -135,6 +139,8 @@ class Settings:
             coerce(key, value)
         if values["message.quote_style"] == "custom" and not all(values[k] for k in ("message.quote_open", "message.quote_close")):
             raise ValueError("自定义引号需要左右两个符号")
+        if values["message.username_bracket_style"] == "custom" and not all(values[k] for k in ("message.username_bracket_open", "message.username_bracket_close")):
+            raise ValueError("自定义姓名括号需要左右两个符号")
 
     def validate_routing(self, routing):
         if set(routing) != {"targets", "exclude", "overrides"}:

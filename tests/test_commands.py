@@ -51,7 +51,7 @@ async def test_paren_only_changes_username(tmp_path):
     await execute(core, parse("/paren once"))
     message = prepare("正文", core.settings, core.paren_once)
     assert message.data["username"] == "【Someone】"
-    assert message.plain == '"正文"'
+    assert message.plain == '「正文」'
     assert core.settings["message.username_brackets"] is False
     await execute(core, parse("/paren on"))
     assert core.settings["message.username_brackets"] is True

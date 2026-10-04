@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import shlex
 from .config import FIELDS, coerce
+from .symbols import bracket_symbols
 
 HELP = {
     "lan": "/lan — 局域网 editor、网卡选择和二维码",
@@ -11,12 +12,12 @@ HELP = {
     "set": "/set key value — 修改并保存设置",
     "name": "/name [名字] — 设置或查看说话人",
     "quote": "/quote [on|off|en|cn|jp|custom] — 引号开关/样式",
-    "paren": "/paren [once|on|off] — 下一条或持续给用户名加【】",
+    "paren": "/paren [once|on|off] — 下一条或持续添加预设 / 自定义姓名括号",
     "endpoints": "/endpoints — 客户端识别、目标与历史来源",
     "target": "/target all|reset|set 选择器...|exclude 选择器...",
     "history": "/history clear — 清空独立历史记录",
     "status": "/status — 服务与端点摘要",
-    "compose": "/compose — 多行草稿",
+    "compose": "/compose — 演出页：整段发送或按间隔逐行发送",
     "source": "/source 文件 — 预检查后执行脚本",
     "help": "/help [命令] — 帮助",
     "quit": "/quit — 退出",
@@ -65,7 +66,7 @@ def parse(text, script=False):
     if name in {"quit", "compose", "endpoints", "status", "lan"}:
         valid = not args
     elif name == "settings":
-        valid = len(args) <= 1 and (not args or args[0] in {"input", "listen", "message", "typing", "routing", "osc", "typewriting", "formatting", "endpoints", "network", "log", "history", "lan"})
+        valid = len(args) <= 1 and (not args or args[0] in {"all", "input", "listen", "message", "typing", "routing", "osc", "typewriting", "formatting", "endpoints", "network", "log", "history", "lan"})
     elif name == "set":
         valid = len(args) >= 2
         if valid:
@@ -112,7 +113,7 @@ async def execute(core, command):
             await core.apply({"message.username_brackets": args[0] == "on"})
             core.paren_once = False
         else:
-            core.report("姓名框【】：" + ("仅下一条" if core.paren_once else "开" if settings["message.username_brackets"] else "关"))
+            core.report("姓名括号" + "".join(bracket_symbols(settings.group("message"))) + "：" + ("仅下一条" if core.paren_once else "开" if settings["message.username_brackets"] else "关"))
     elif name == "nocc":
         await core.apply({"input.interrupt_guard": args[0] == "on" if args else not settings["input.interrupt_guard"]})
     elif name == "target":

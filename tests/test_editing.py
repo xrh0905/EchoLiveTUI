@@ -70,8 +70,8 @@ async def test_shift_enter_copies_buffer_and_selection_formatting(tmp_path, monk
         assert app.clipboard == "选中"
         await pilot.press("shift+enter")
         await pilot.pause()
-        assert isinstance(app.screen, ComposeScreen)
-        assert app.screen.query_one(TextArea).text == entry.value
+        assert isinstance(app.active_page, ComposeScreen)
+        assert app.active_page.query_one(TextArea).text == entry.value
         assert app.core.compose_draft == entry.value
 
 
@@ -144,10 +144,10 @@ async def test_compose_multiline_format_keeps_selected_text(tmp_path):
         app.core.compose_draft = "前面\n选中\n后面"
         app.open_screen("compose")
         await pilot.pause()
-        area = app.screen.query_one(TextArea)
+        area = app.active_page.query_one(TextArea)
         area.selection = AreaSelection((0, 1), (1, 2))
         await pilot.pause(.2)
-        await pilot.click("FormatLink")
+        await pilot.click("#compose-format FormatLink")
         await pilot.pause()
         assert area.text == "前@b面\n选中@r\n后面"
         assert area.selected_text == "面\n选中"

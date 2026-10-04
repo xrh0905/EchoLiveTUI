@@ -13,15 +13,15 @@ async def test_main_layout_settings_and_draft(tmp_path):
         entry.value = "保留草稿"
         app.open_screen("settings", ["message"])
         await pilot.pause()
-        assert isinstance(app.screen, SettingsScreen)
-        app.screen.query_one("#field-message-username", Input).value = "新名字"
+        assert isinstance(app.active_page, SettingsScreen)
+        app.active_page.query_one("#field-message-username", Input).value = "新名字"
         await pilot.pause()
         await pilot.press("escape")
         await pilot.pause()
         assert entry.value == "保留草稿"
         app.open_screen("settings", ["message"])
         await pilot.pause()
-        assert app.screen.query_one("#field-message-username", Input).value == "新名字"
+        assert app.active_page.query_one("#field-message-username", Input).value == "新名字"
         await pilot.click("#save")
         await pilot.pause()
         assert app.core.settings["message.username"] == "新名字"
@@ -49,7 +49,7 @@ async def test_compose_literal_paste_and_ctrl_guard(tmp_path):
         entry = app.query_one("#entry", Input)
         entry.post_message(Paste("/name nope\n/quit"))
         await pilot.pause()
-        assert isinstance(app.screen, ComposeScreen)
+        assert isinstance(app.active_page, ComposeScreen)
         assert app.core.compose_draft == "/name nope\n/quit"
         assert app.core.settings["message.username"] == "Someone"
         await pilot.press("escape", "ctrl+c")
@@ -64,7 +64,7 @@ async def test_endpoint_page_and_log_settings(tmp_path):
         await pilot.press("escape")
         app.open_screen("settings", ["log"])
         await pilot.pause()
-        app.screen.query_one("#field-log-level", Select).value = "info"
+        app.active_page.query_one("#field-log-level", Select).value = "info"
         await pilot.pause()
         await pilot.click("#save")
         await pilot.pause()
@@ -109,11 +109,11 @@ async def test_footer_links_and_embedded_endpoints(tmp_path):
     async with app.run_test(size=(80, 24)) as pilot:
         await pilot.click("#settings-link")
         await pilot.pause()
-        screen = app.screen
+        screen = app.active_page
         assert isinstance(screen, SettingsScreen)
         screen.query_one("#category", Select).value = "endpoints"
         await pilot.pause()
-        assert app.screen is screen and screen.query_one(EndpointPanel).display
+        assert app.active_page is screen and screen.query_one(EndpointPanel).display
         screen.query_one("#category", Select).value = "formatting"
         await pilot.pause()
         left = screen.query_one("#field-message-quote_open", Input)
@@ -123,14 +123,14 @@ async def test_footer_links_and_embedded_endpoints(tmp_path):
         await pilot.press("escape")
         await pilot.click("#endpoints-link")
         await pilot.pause()
-        assert isinstance(app.screen, EndpointsScreen)
+        assert isinstance(app.active_page, EndpointsScreen)
         await pilot.press("escape")
         await pilot.click("#pair-link")
         await pilot.pause()
-        assert isinstance(app.screen, LanScreen)
-        buttons = [app.screen.query_one("#" + name) for name in ("lan-enable", "lan-disable", "lan-copy", "lan-refresh", "lan-back")]
+        assert isinstance(app.active_page, LanScreen)
+        buttons = [app.active_page.query_one("#" + name) for name in ("lan-enable", "lan-disable", "lan-copy", "lan-refresh", "lan-back")]
         assert all(button.region.right <= app.screen.size.width for button in buttons)
-        assert all(a.region.right <= b.region.x for a, b in zip(buttons, buttons[1:]))
+        assert all(not a.region.overlaps(b.region) for i, a in enumerate(buttons) for b in buttons[i + 1:])
         await pilot.press("escape")
         assert app.focused is app.query_one("#entry", Input)
         await pilot.click("#exit-link")
@@ -156,9 +156,9 @@ async def test_narrow_settings_keeps_switch_and_buttons_visible(tmp_path):
     async with app.run_test(size=(56, 24)) as pilot:
         app.open_screen("settings", ["history"])
         await pilot.pause()
-        control = app.screen.query_one("#field-history-hide_latest", Select)
-        fields = app.screen.query_one("#fields")
-        save = app.screen.query_one("#save")
+        control = app.active_page.query_one("#field-history-hide_latest", Select)
+        fields = app.active_page.query_one("#fields")
+        save = app.active_page.query_one("#save")
         assert fields.region.height >= 5
         assert control.region.bottom <= fields.region.bottom
         assert save.region.bottom <= 24

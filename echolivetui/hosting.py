@@ -18,8 +18,8 @@ class Hosting:
         self.root = next((candidate for candidate in (root, root / "EchoLive") if all((candidate / p).is_file() for p in REQUIRED)), None)
         self.token, self.settings = token, settings
         self.version = None
-        if self.root and (root / "app.js").is_file():
-            match = re.search(r"version\s*:\s*['\"](\d+\.\d+\.\d+)['\"]", (root / "app.js").read_text(encoding="utf-8"))
+        if self.root and (self.root / "app.js").is_file():
+            match = re.search(r"version\s*:\s*['\"]([^'\"]+)['\"]", (self.root / "app.js").read_text(encoding="utf-8-sig"))
             self.version = match.group(1) if match else None
 
     def metadata(self, request):

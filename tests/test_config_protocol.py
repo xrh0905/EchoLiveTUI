@@ -52,7 +52,7 @@ def test_pipeline_once_wrap(tmp_path):
     s = Settings(tmp_path / "s.yaml")
     s.values.update({"message.typewriting": False, "message.username_brackets": False})
     p = prepare("Hello", s, True)
-    assert p.plain == '"Hello"'
+    assert p.plain == '「Hello」'
     assert p.original == "Hello"
     assert p.data["username"] == "【Someone】"
     assert prepare("Hello", s).data["username"] == "Someone"

@@ -3,7 +3,7 @@ import json
 from dataclasses import dataclass
 from .message import parse_message, apply_autopause, render, get_delay
 
-QUOTES = {"en": ('"', '"'), "cn": ("“", "”"), "jp": ("「", "」")}
+from .symbols import QUOTES
 
 
 def quote_symbols(settings):

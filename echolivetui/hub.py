@@ -8,6 +8,7 @@ import time
 from .protocol import Profile, Sender, target_matches, validate_envelope, version_tuple
 from .history import HistoryDelivery, entries_from_data
 from .message import typewrite_incoming
+from .playback import PrintingReceipt
 
 
 @dataclass
@@ -21,35 +22,44 @@ class Peer:
     closed: bool = False
     closing: bool = False
     observed: Profile | None = None
+    playbacks: dict[int, PrintingReceipt] = field(default_factory=dict)
+    ready_at: float = 0.0
+    current_playback: PrintingReceipt | None = None
 
-    def enqueue(self, envelope, delay=0, fast=False):
+    def enqueue(self, envelope, delay=0, fast=False, playback=None):
         if self.closed:
             return False
         try:
             (self.control if fast else self.queue).put_nowait((envelope, delay))
+            if playback is not None:
+                self.playbacks[id(envelope)] = playback
             self.wake.set()
             return True
         except asyncio.QueueFull:
             return False
 
     async def write_loop(self, report):
-        ready = 0.0
         try:
             while not self.closed:
                 self.wake.clear()
                 now = time.monotonic()
                 if not self.control.empty():
                     envelope, _ = self.control.get_nowait()
-                elif not self.queue.empty() and now >= ready:
+                elif not self.queue.empty() and now >= self.ready_at:
                     envelope, delay = self.queue.get_nowait()
-                    ready = now + delay
+                    self.ready_at = now + delay
                 else:
-                    timeout = max(0, ready - now) if not self.queue.empty() else None
+                    timeout = max(0, self.ready_at - now) if not self.queue.empty() else None
                     try:
                         await asyncio.wait_for(self.wake.wait(), timeout)
                     except TimeoutError:
                         pass
                     continue
+                playback = self.playbacks.get(id(envelope))
+                if envelope["action"] == "message_data":
+                    self.current_playback = playback
+                if playback is not None:
+                    playback.sent.set()
                 await asyncio.wait_for(self.ws.send_json(envelope), 10)
                 if envelope["action"] in {"message_data", "echo_printing"}:
                     report(f"已写入：{self.profile.name}", "debug")
@@ -58,12 +68,29 @@ class Peer:
             await self.ws.close()
         finally:
             self.closed = True
+            self.fail_playbacks()
+
+    def observe_playback(self, action, data):
+        for key, receipt in list(self.playbacks.items()):
+            receipt.observe(action, data)
+            if receipt.finished.is_set():
+                if receipt is self.current_playback:
+                    self.ready_at = 0.0
+                    self.current_playback = None
+                    self.wake.set()
+                self.playbacks.pop(key, None)
+
+    def fail_playbacks(self):
+        for receipt in self.playbacks.values():
+            receipt.fail(f"字幕端 {self.profile.name} 已断开，演出已暂停")
+        self.playbacks.clear()
 
     async def close(self):
         if self.closing:
             return
         self.closing = True
         self.closed = True
+        self.fail_playbacks()
         if self.worker:
             self.worker.cancel()
             await asyncio.gather(self.worker, return_exceptions=True)
@@ -153,6 +180,7 @@ class Hub:
             raise ValueError("同一连接不能更改 UUID")
         peer = await self.register(ws, envelope, ip, metadata)
         action = envelope["action"]
+        peer.observe_playback(action, envelope.get("data", {}))
         if action in {"websocket_heartbeat", "heartbeat"}:
             # Upstream addresses heartbeats to @__ws_server; observers need a
             # reachable target while the original sender and payload stay intact.
@@ -199,7 +227,7 @@ class Hub:
             await self.disconnect(peer)
         return peer
 
-    def broadcast(self, data, delay):
+    def broadcast(self, data, delay, *, playback=None):
         targets = self.targets()
         entries = list(entries_from_data(data))
         if any(p.queue.full() for p in targets):
@@ -207,9 +235,18 @@ class Hub:
         if any(p.control.qsize() + len(entries) + (p.profile.uuid in self.history.pending) > p.control.maxsize for p in self.history.receivers()):
             raise ValueError("历史端队列已满，草稿已保留")
         for peer in targets:
-            peer.enqueue(self.sender.envelope("message_data", data, peer.profile.uuid), delay)
+            receipt = PrintingReceipt(data.get("username", ""), entries[0].message, delay, endpoint=(peer.profile.uuid, peer.profile.name)) if playback is not None else None
+            peer.enqueue(self.sender.envelope("message_data", data, peer.profile.uuid), delay, playback=receipt)
+            if receipt is not None:
+                playback.append(receipt)
         self.history.publish(entries)
         return len(targets)
+
+    def release_playback(self, receipts):
+        for peer in self.peers.values():
+            for key, receipt in list(peer.playbacks.items()):
+                if receipt in receipts:
+                    peer.playbacks.pop(key, None)
 
     def typing(self, username):
         sent = 0
