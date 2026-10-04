@@ -40,6 +40,6 @@ async def run():
             app.open_screen("settings", ["network"])
             await pilot.pause()
             await pilot.press("escape")
-            app.open_screen("lan")
+            app.open_screen("connect")
             await pilot.pause()
     print("SELF-TEST PASS: Textual, message dictionaries, QR, interfaces, HTTP and WebSocket", flush=True)

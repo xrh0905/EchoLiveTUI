@@ -7,7 +7,7 @@ from .config import FIELDS, coerce
 from .symbols import bracket_symbols
 
 HELP = {
-    "lan": "/lan — 局域网 editor、网卡选择和二维码",
+    "connect": "/connect — 局域网 editor、网卡选择和二维码",
     "settings": "/settings [input|typewriting|formatting|typing|endpoints|network|history|log|osc] — 设置界面",
     "set": "/set key value — 修改并保存设置",
     "name": "/name [名字] — 设置或查看说话人",
@@ -25,7 +25,7 @@ HELP = {
     "clear": "/clear — /history clear 的别名",
     "exit": "/exit — /quit 的别名",
 }
-INTERACTIVE = {"settings", "endpoints", "compose", "quit", "source", "lan"}
+INTERACTIVE = {"settings", "endpoints", "compose", "quit", "source", "connect"}
 
 
 @dataclass
@@ -63,7 +63,7 @@ def parse(text, script=False):
     if script and name in INTERACTIVE:
         raise ValueError(f"脚本不能使用 /{name}")
     valid = True
-    if name in {"quit", "compose", "endpoints", "status", "lan"}:
+    if name in {"quit", "compose", "endpoints", "status", "connect"}:
         valid = not args
     elif name == "settings":
         valid = len(args) <= 1 and (not args or args[0] in {"all", "input", "listen", "message", "typing", "routing", "osc", "typewriting", "formatting", "endpoints", "network", "log", "history", "lan"})

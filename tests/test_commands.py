@@ -3,12 +3,23 @@ import pytest
 from echolivetui.commands import parse, execute
 from echolivetui.config import Settings
 from echolivetui.core import Core
+from echolivetui.commands import HELP
 
 
 @pytest.mark.parametrize("text,expected", [("//settings", "/settings"), ("///x", "//x"), ("hello", "hello")])
 def test_literal_slash(text, expected):
     assert parse(text).args == [expected]
     assert parse(text).name == "text"
+
+
+def test_connect_replaces_lan_in_commands_help_and_scripts():
+    assert parse("/connect").name == "connect"
+    assert "connect" in HELP and "lan" not in HELP
+    for command in ("/lan", "/connect extra"):
+        with pytest.raises(ValueError):
+            parse(command)
+    with pytest.raises(ValueError, match="脚本不能使用 /connect"):
+        parse("/connect", script=True)
 
 
 async def test_quote_and_failed_once(tmp_path):

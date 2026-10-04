@@ -27,6 +27,7 @@ from .symbols import QUOTES, BRACKETS, bracket_symbols
 from .capabilities import Capabilities
 from .playback import DeliveryUnavailable
 from .echolive_panel import EchoLivePanel
+from .history import MessageReport
 from . import __version__
 
 
@@ -96,7 +97,7 @@ class HistoryLog(RichLog, can_focus=False):
         width = self.scrollable_content_region.width
         if row >= len(self.lines):
             return Strip.blank(width, self.rich_style)
-        text = Text(self.lines[row].text, style=self.rich_style, no_wrap=True)
+        text = Text.assemble(*[(segment.text, segment.style) for segment in self.lines[row]], style=self.rich_style, no_wrap=True)
         selection = self.text_selection
         if selection is not None and (span := selection.get_span(row)) is not None:
             start, end = span
@@ -380,7 +381,7 @@ class SettingsScreen(HistoryPage):
         event.stop()
         action = event.button.id
         if action == "lan-entry":
-            self.app.open_screen("lan")
+            self.app.open_screen("connect")
             return
         if action == "endpoint-refresh":
             self.query_one(EndpointPanel).refresh_peers()
@@ -931,7 +932,7 @@ class EchoApp(App, inherit_bindings=False):
                 yield DisplayText("", id="typing-state", markup=False)
         with Horizontal(id="footer"):
             yield DisplayText("", id="enhancements", markup=False)
-            yield ActionLink("连接", name="lan", id="pair-link")
+            yield ActionLink("连接", name="connect", id="pair-link")
             yield ActionLink("端点", name="endpoints", id="endpoints-link")
             yield ActionLink("多行", name="compose", id="compose-link")
             yield ActionLink("设置", name="settings", id="settings-link")
@@ -958,9 +959,9 @@ class EchoApp(App, inherit_bindings=False):
                 name, content = "EchoLiveTUI", text
             record = Table.grid(padding=(0, 1), expand=True)
             record.add_column(width=8, no_wrap=True)
-            record.add_column(width=16, no_wrap=True, overflow="ellipsis")
+            record.add_column(min_width=4, max_width=max(4, min(12, (self.size.width - 2) // 6)), no_wrap=True, overflow="ellipsis")
             record.add_column(ratio=1, overflow="fold")
-            record.add_row(f"{datetime.now():%H:%M:%S}", Text(name), Text(content))
+            record.add_row(f"{datetime.now():%H:%M:%S}", Text(name, style="underline" if not isinstance(text, MessageReport) else ""), Text(content))
             self.query_one("#log", RichLog).write(record)
         except Exception:
             self.pending_logs.append(text)
@@ -986,7 +987,7 @@ class EchoApp(App, inherit_bindings=False):
                 display.update(preview(entry.value[1:] if entry.value.startswith("//") else entry.value, s) if not entry.value.startswith("/") or entry.value.startswith("//") else "")
         quote = "".join(quote_symbols(s)) if s["message.quote"] else "关"
         paren = "".join(bracket_symbols(s.group("message"))) if s["message.username_brackets"] or core.paren_once else "无"
-        basic = f"引号 {quote}  姓名 {paren} 后缀 {s['message.suffix_value'] if s['message.suffix'] else '无'}"
+        basic = f"引号 {quote} 姓名 {paren} 后缀 {s['message.suffix_value'] if s['message.suffix'] else '无'}"
         more = f" 模拟打字 {str(s['message.print_speed']) + 'ms' if s['message.typewriting'] else '○'} 模拟停顿 {str(s['message.autopausetime'] * s['message.print_speed']) + 'ms' if s['message.autopause'] else '○'}"
         self.query_one("#enhancements", Static).update(basic + more)
         self.query_one("#hints", Static).update("Tab/↑↓ 选择 · Enter 补全 · Esc 关闭" if self.completing else "Enter 发送")
@@ -1091,7 +1092,7 @@ class EchoApp(App, inherit_bindings=False):
             page = EndpointsScreen()
         elif name == "compose":
             page = ComposeScreen()
-        elif name == "lan":
+        elif name == "connect":
             page = LanScreen()
         else:
             return

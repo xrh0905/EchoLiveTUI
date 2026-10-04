@@ -14,6 +14,7 @@ from .addresses import first_ipv4, hosted_notice
 from .lan import choose_address, editor_url
 from .capabilities import Capabilities
 from .playback import DeliveryUnavailable
+from .history import MessageReport
 
 
 class Core:
@@ -49,7 +50,7 @@ class Core:
 
     def report_lan(self):
         if self.server.lan_address:
-            self.report("EchoLiveTUI：远程 editor " + editor_url(*self.server.lan_address) + " · /lan 查看二维码")
+            self.report("EchoLiveTUI：远程 editor " + editor_url(*self.server.lan_address) + " · /connect 查看二维码")
 
     async def apply(self, updates, base=None):
         candidate = dict(self.settings.values)
@@ -121,7 +122,7 @@ class Core:
         self.paren_once = False
         self.cancel_typing()
         result = f"{self.settings['message.username']}：{text}"
-        self.report(result)
+        self.report(MessageReport(result))
         self.hub.log(f"已接受：字幕 {count} · 历史 {history_count}" + (" · OSC 已发送" if osc_sent else ""), "debug")
         return result
 

@@ -2,6 +2,10 @@
 from dataclasses import dataclass
 
 
+class MessageReport(str):
+    """User-authored history text, distinct from system diagnostics."""
+
+
 def plain_message(message):
     if isinstance(message, str):
         return message

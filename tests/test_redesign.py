@@ -9,6 +9,8 @@ from echolivetui.capabilities import Capabilities
 from echolivetui.config import Settings
 from echolivetui.core import Core
 from echolivetui.hosting import REQUIRED
+from echolivetui.hub import Peer
+from echolivetui.protocol import Profile
 from echolivetui.pipeline import prepare
 from echolivetui.ui import EchoApp, ComposeScreen, HistoryLog, FormatLink, PageTabs
 from echolivetui.lan import editor_url, terminal_qr
@@ -104,13 +106,59 @@ async def test_footer_simulation_switches_between_open_circle_and_milliseconds(t
         settings["message.autopausetime"] = 0
         app.refresh_status()
         assert "模拟停顿 0ms" in str(footer.content)
+        assert "引号 「」 姓名" in str(footer.content)
+        assert "引号 「」  姓名" not in str(footer.content)
+
+
+async def test_connect_command_opens_connection_page_and_completes(tmp_path):
+    app = EchoApp(Settings(tmp_path / "s.yaml"), tmp_path, start_server=False)
+    async with app.run_test() as pilot:
+        entry = app.query_one("#entry", Input)
+        entry.value = "/con"
+        await pilot.pause()
+        assert app.candidates == ["/connect"]
+        await pilot.press("tab", "enter")
+        assert entry.value == "/connect "
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.active_page.query("#lan-interface")
+        assert app.query_one("#pair-link").name == "connect"
+
+
+async def test_history_system_names_underlined_and_user_names_compact(tmp_path):
+    class Socket:
+        async def close(self):
+            pass
+    app = EchoApp(Settings(tmp_path / "s.yaml"), tmp_path, start_server=False)
+    app.core.settings.values["message.username"] = "短名"
+    app.core.hub.peers["live"] = Peer(Socket(), Profile("live", role="live"))
+    async with app.run_test(size=(80, 24)) as pilot:
+        app.report("EchoLiveTUI：system notice")
+        app.core.submit("user content")
+        await pilot.pause()
+        log = app.query_one(HistoryLog)
+        system_line = next(i for i, line in enumerate(log.lines) if "system notice" in line.text)
+        user_line = next(i for i, line in enumerate(log.lines) if "user content" in line.text)
+        system = list(log.render_line(system_line))
+        assert any("EchoLiveTUI" in segment.text and segment.style.underline for segment in system)
+        assert not any(segment.style and segment.style.overline for segment in system)
+        assert not any(segment.style and segment.style.underline for segment in log.render_line(user_line))
+        text = log.lines[user_line].text
+        assert text.index("user content") - text.index("短名") < 10
+        assert log.records[-1].columns[1].width is None
+        # A user can use the same name as the application without system styling.
+        app.core.settings.values["message.username"] = "EchoLiveTUI"
+        app.core.submit("same name user")
+        await pilot.pause()
+        user_line = next(i for i, line in enumerate(log.lines) if "same name user" in line.text)
+        assert not any(segment.style and segment.style.underline for segment in log.render_line(user_line))
 
 
 @pytest.mark.parametrize("width", [56, 80, 100])
 async def test_compact_controls_and_navigation_band_stay_at_page_bottom(tmp_path, width):
     app = EchoApp(Settings(tmp_path / "s.yaml"), tmp_path, start_server=False)
     async with app.run_test(size=(width, 30)) as pilot:
-        for name in ("settings", "endpoints", "lan", "compose"):
+        for name in ("settings", "endpoints", "connect", "compose"):
             app.open_screen(name)
             await pilot.pause()
             page = app.active_page
@@ -155,7 +203,7 @@ async def test_connection_qr_fits_left_half_and_controls_stay_right(tmp_path):
     app = EchoApp(Settings(tmp_path / "s.yaml"), tmp_path, start_server=False)
     app.core.server.lan_address = ("192.168.1.3", 3000)
     async with app.run_test(size=(100, 30)) as pilot:
-        app.open_screen("lan")
+        app.open_screen("connect")
         await pilot.pause()
         page = app.active_page
         left, right = page.query_one("#lan-left"), page.query_one("#lan-right")

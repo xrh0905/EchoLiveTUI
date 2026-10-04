@@ -6,7 +6,7 @@ import copy
 from dataclasses import dataclass, field
 import time
 from .protocol import Profile, Sender, target_matches, validate_envelope, version_tuple
-from .history import HistoryDelivery, entries_from_data
+from .history import HistoryDelivery, MessageReport, entries_from_data
 from .message import typewrite_incoming
 from .playback import PrintingReceipt
 
@@ -199,7 +199,7 @@ class Hub:
             self.history.publish(entries)
             if peer.profile.role == "server":
                 for entry in entries:
-                    self.report(f"{entry.username or peer.profile.name}：{entry.message}")
+                    self.report(MessageReport(f"{entry.username or peer.profile.name}：{entry.message}"))
         elif action == "history_clear":
             self.history.pending.clear()
         if action == "echo_state_update":
