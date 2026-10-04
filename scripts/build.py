@@ -20,7 +20,7 @@ def main():
         parser.error("此构建脚本面向 Windows x64")
     from echolivetui import __version__
     # Windows version resources require numeric components, including prereleases.
-    windows_version = ".".join(re.findall(r"\d+", __version__)[:4])
+    windows_version = ".".join((re.findall(r"\d+", __version__) + ["0"] * 4)[:4])
     output = root / "build" / args.mode
     output.mkdir(parents=True, exist_ok=True)
     command = [sys.executable, "-m", "nuitka", f"--mode={args.mode}", "--msvc=latest", "--assume-yes-for-downloads", "--windows-console-mode=force", f"--jobs={args.jobs}", "--include-package=echolivetui", "--include-package=textual", "--include-package=rich", "--include-package-data=textual", "--include-package-data=jieba", "--include-package-data=pypinyin", "--include-distribution-metadata=textual", "--include-distribution-metadata=rich", "--output-filename=EchoLiveTUI.exe", f"--output-dir={output}", f"--report={output / 'compilation-report.xml'}", f"--product-version={windows_version}", f"--file-version={windows_version}", "--product-name=EchoLiveTUI", "--file-description=Echo Live terminal broadcaster", str(root / "launcher.py")]
