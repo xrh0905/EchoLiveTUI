@@ -31,13 +31,16 @@ async def test_main_layout_settings_and_draft(tmp_path):
 async def test_failed_submit_and_skip_retains_text(tmp_path):
     app = EchoApp(Settings(tmp_path / "s.yaml"), tmp_path, start_server=False)
     async with app.run_test() as pilot:
+        await pilot.pause()
         entry = app.query_one("#entry", Input)
         entry.value = "not sent"
         await pilot.press("enter")
+        await pilot.pause()
         assert entry.value == "not sent"
         assert app.query_one("#error").display
         entry.value = "/skip"
         await pilot.press("enter")
+        await pilot.pause()
         assert entry.value == "/skip"
         assert app.core.paren_once is False
 

@@ -180,10 +180,22 @@ async def test_compact_controls_and_navigation_band_stay_at_page_bottom(tmp_path
                     control = page.query_one(selector)
                     assert control.size.height == 1 and control.region.y == buttons[0].region.y
                     assert page.region.contains_region(control.region)
-                page.paused = True
-                page.set_running(False)
-                await pilot.pause()
-                assert page.region.contains_region(page.query_one("#back").region)
+                for running, paused in ((True, False), (False, True), (True, True), (False, False)):
+                    page.paused = paused
+                    page.set_running(running)
+                    await pilot.pause()
+                    send, back = page.query_one("#send", Button), page.query_one("#back", Button)
+                    expected = "暂停" if running else "继续发送" if paused else "发送"
+                    assert send.label.plain == expected
+                    assert send.size.width >= send.get_content_width(page.size, app.size)
+                    actions = page.query_one("#performance-actions")
+                    for button in (send, back):
+                        assert page.region.contains_region(button.region)
+                        assert actions.region.contains_region(button.region)
+                        assert button.region.bottom == page.region.bottom
+                    assert not send.region.overlaps(back.region)
+                    assert back.region.right == page.region.right - 1
+                    assert page.query_one("#line-interval").region.right <= send.region.x
 
 
 async def test_format_labels_are_chinese_without_copy_hint(tmp_path):

@@ -458,9 +458,9 @@ class ComposeScreen(HistoryPage):
                 yield Checkbox("逐行发送", id="line-mode", compact=True)
                 yield Label("间隔 ms")
                 yield Input("1000", id="line-interval", type="integer", disabled=True, compact=True)
-                yield Static("", classes="action-spacer")
-                yield Button("发送", id="send", variant="primary")
-                yield Button("取消/返回", id="back")
+                with Horizontal(id="performance-actions"):
+                    yield Button("发送", id="send", variant="primary")
+                    yield Button("取消/返回", id="back")
 
     def on_mount(self):
         self.query_one(TextArea).focus()
@@ -492,6 +492,7 @@ class ComposeScreen(HistoryPage):
         # Pause must remain responsive even immediately after starting.
         button.remove_class("-active")
         button.label = "暂停" if running else "继续发送" if self.paused else "发送"
+        button.refresh(layout=True)
         area.set_class(running, "sending")
 
     def show_error(self, error):
@@ -892,10 +893,10 @@ class EchoApp(App, inherit_bindings=False):
     #multiline { height: 1fr; min-height: 3; scrollbar-size: 1 1; }
     #compose-preview, #compose-suggestions { height: 1; overflow: hidden; }
     #performance-controls { height: 1; dock: bottom; }
-    .action-spacer { width: 1fr; height: 1; }
+    #performance-actions { width: 1fr; min-width: 0; height: 1; align-horizontal: right; }
     #performance-controls Checkbox { width: auto; margin-right: 1; }
     #performance-controls Label { width: auto; height: 1; margin-right: 1; }
-    #line-interval { width: 9; height: 1; min-height: 1; border: none !important; padding: 0 1; margin-right: 1; }
+    #line-interval { width: 9; height: 1; min-height: 1; border: none !important; padding: 0 1; }
     ComposeArea.sending .text-area--cursor-line { background: #31554a; }
     """
 
