@@ -1,6 +1,7 @@
 """Optional integration check: pip install playwright; uses installed Edge on Windows."""
 import asyncio
 import hashlib
+import json
 from pathlib import Path
 import sys
 import tempfile
@@ -74,6 +75,28 @@ async def main():
                 assert "FORMAT_BOLD" in "".join(await pages[0].locator(".echo-text-bold").all_text_contents())
                 assert "RAINBOW" in "".join(await pages[0].locator(".echo-text-rainbow").all_text_contents())
                 assert await pages[0].evaluate("window.eltuiShoutSeen")
+                symbols = "————……！！！？？？💥👩‍💻"
+                settings.values["message.typewriting"] = True
+                for scheme in ("pinyin", "zhuyin"):
+                    settings.values["message.typewriting_scheme"] = scheme
+                    playback = []
+                    prefix = f"SYMBOLS_{scheme} "
+                    core.submit(prefix + "@b你好" + symbols + "@r再见", playback=playback)
+                    try:
+                        await core.wait_for_printing(playback)
+                    except ValueError:
+                        print("Print diagnostics:", json.dumps({
+                            "errors": errors,
+                            "receipts": [{"started": receipt.started, "message": receipt.message} for receipt in playback],
+                            "pages": [await page.evaluate("({state: echo.state, message: echo.message, rendered: document.querySelector('.echo-output').textContent})") for page in pages[:2]],
+                        }, ensure_ascii=True), flush=True)
+                        raise
+                    for page in pages[:2]:
+                        rendered = await page.locator('.echo-output').text_content()
+                        assert rendered.replace('\u200b', '').replace('\u2002', ' ') == prefix + "你好" + symbols + "再见", rendered
+                        assert symbols in ''.join(await page.locator('.echo-text-bold').all_text_contents()).replace('\u200b', '')
+                settings.values.update({"message.typewriting": False, "message.typewriting_scheme": "pinyin"})
+                print('PASS literal symbol runs: pinyin, zhuyin, long punctuation, emoji, styles and print completion', flush=True)
                 editor = await context.new_page()
                 editor.on("pageerror", lambda error: errors.append(error.stack))
                 await editor.goto(f"http://{lan}:{port}/editor.html")

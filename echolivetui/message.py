@@ -5,6 +5,7 @@ import json
 import copy
 import re
 import string
+import unicodedata
 from typing import Any, Dict, Iterable, List, Optional
 
 import jieba
@@ -71,8 +72,15 @@ def _typewriting_zhuyin(text: str) -> str:
     return "".join(result)
 
 
+def _is_symbol_run(text: str) -> bool:
+    """Keep punctuation, symbols and emoji joining marks in one input unit."""
+    return bool(text) and all(unicodedata.category(char)[0] in "PSM" or char in "\u200c\u200d" for char in text)
+
+
 def get_typewriting_string(text: str, scheme: str | None = None) -> str:
     """Return a phonetic representation for the typewriting effect."""
+    if _is_symbol_run(text):
+        return ""
     normalized = normalize_typewriting_scheme(scheme)
     if normalized == "zhuyin":
         return _typewriting_zhuyin(text)
@@ -93,7 +101,20 @@ def _tokenize_for_typewrite(text: str) -> List[str]:
     if last_end < len(text):
         tokens.append(text[last_end:])
 
-    return [token for token in tokens if token]
+    merged: List[str] = []
+    symbols: List[str] = []
+    for token in tokens:
+        if _is_symbol_run(token):
+            symbols.append(token)
+        else:
+            if symbols:
+                merged.append("".join(symbols))
+                symbols.clear()
+            if token:
+                merged.append(token)
+    if symbols:
+        merged.append("".join(symbols))
+    return merged
 
 
 def typewrite_incoming(data: dict, scheme: str) -> dict:
@@ -112,7 +133,9 @@ def typewrite_incoming(data: dict, scheme: str) -> dict:
         if isinstance(message, dict):
             text = message.get("text")
             if isinstance(text, str) and text and "typewrite" not in message:
-                message["typewrite"] = get_typewriting_string(text, scheme)
+                typewrite = get_typewriting_string(text, scheme)
+                if typewrite:
+                    message["typewrite"] = typewrite
         return message
 
     messages = result.get("messages")

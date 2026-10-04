@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import pytest
 
 from echolivetui.config import FIELDS
 DEFAULT_CONFIG = {k.split(".", 1)[1]: f.default for k, f in FIELDS.items() if k.startswith("message.")}
@@ -93,4 +94,47 @@ def test_incoming_typewriting_preserves_editor_fields():
     assert parts[0] == {**data["messages"][1]["message"][0], "typewrite": get_typewriting_string("凉宫", "zhuyin")}
     assert parts[1:4] == data["messages"][1]["message"][1:4]
     assert parts[4]["text"] == "文字"
+
+
+@pytest.mark.parametrize("scheme", ["pinyin", "zhuyin"])
+@pytest.mark.parametrize("symbols", [
+    "——————", "……", "！！！？？？", "，，。。。", "...---___!!!???",
+    "━━━━━━━━───", "≈≠≤≥±∞", "💥💥👩‍💻👨‍👩‍👧‍👦", "❤️❤️👍🏽", "🇨🇳🇯🇵",
+    "—" * 4096,
+])
+def test_symbol_runs_are_single_literal_segments(scheme, symbols):
+    config = dict(DEFAULT_CONFIG, typewriting=True, typewriting_scheme=scheme, print_speed=7)
+    source = [{"text": "你好" + symbols + "再见", "style": {"bold": True}, "class": ["echo-text-warn"], "event": "shout"}]
+    parts = json.loads(render(config, source))["data"]["messages"][0]["message"]
+    assert [part["text"] for part in parts] == ["你好", symbols, "再见"]
+    assert "typewrite" not in parts[1]
+    assert parts[0]["typewrite"] and parts[2]["typewrite"]
+    assert all(part["style"]["bold"] and part["speed"] == 7 and part["class"] == "echo-text-warn" for part in parts)
+    assert [part.get("event") for part in parts] == ["shout", None, None]
+    assert get_typewriting_string(symbols, scheme) == ""
+    incoming = {"username": "手机", "messages": [{"message": "你好" + symbols + "再见", "data": {"printSpeed": 42}}]}
+    converted = typewrite_incoming(incoming, scheme)
+    assert [part["text"] for part in converted["messages"][0]["message"]] == ["你好", symbols, "再见"]
+    assert converted["messages"][0]["message"][1] == {"text": symbols}
+    assert converted["messages"][0]["data"] == {"printSpeed": 42}
+    assert incoming["messages"][0]["message"] == "你好" + symbols + "再见"
+
+
+def test_symbol_grouping_preserves_formatting_and_pause_boundaries():
+    config = dict(DEFAULT_CONFIG, typewriting=True, autopause=True, autopausestr="！", autopausetime=2)
+    parsed = apply_autopause(config, parse_message("@b你好————！！！@r？？？再见"))
+    parts = json.loads(render(config, parsed))["data"]["messages"][0]["message"]
+    assert "".join(part.get("text", "") for part in parts) == "你好————！！！？？？再见"
+    assert next(part for part in parts if part.get("text") == "————！！！")["style"]["bold"]
+    assert not next(part for part in parts if part.get("text") == "？？？").get("style", {}).get("bold")
+    assert [part["pause"] for part in parts if "pause" in part] == [2, 2]
+
+
+def test_symbol_grouping_keeps_whitespace_and_editor_phonetics():
+    source = {"messages": [{"message": ["————  ！！！\n世界", {"text": "……", "typewrite": "editor"}]}]}
+    parts = typewrite_incoming(source, "pinyin")["messages"][0]["message"]
+    assert "".join(part["text"] for part in parts) == "————  ！！！\n世界……"
+    assert parts[0] == {"text": "————"}
+    assert next(part for part in parts if part["text"] == "！！！") == {"text": "！！！"}
+    assert parts[-1] == {"text": "……", "typewrite": "editor"}
 

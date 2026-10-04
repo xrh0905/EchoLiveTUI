@@ -7,6 +7,7 @@ from textual.widgets import Button, Checkbox, Input, Static, TextArea
 from echolivetui.config import Settings
 from echolivetui.core import Core
 from echolivetui.history import entries_from_data
+from echolivetui.playback import PrintingReceipt
 from echolivetui.ui import EchoApp
 
 
@@ -19,6 +20,20 @@ class Socket:
 
     async def close(self):
         pass
+
+
+@pytest.mark.parametrize("message", ["你好——\u200b——！\u200b！\u200b！", [{"text": "你好——\u200b——！\u200b！\u200b！"}]])
+async def test_filtered_symbol_receipt_matches_only_printed_text(message):
+    receipt = PrintingReceipt("字幕！！", "你好————！！！", 0)
+    receipt.sent.set()
+    receipt.observe("echo_printing", {"username": "字幕！\u200b！", "message": "不匹配"})
+    receipt.observe("echo_state_update", {"state": "stop"})
+    assert not receipt.finished.is_set()
+    receipt.observe("echo_printing", {"username": "字幕！\u200b！", "message": message})
+    receipt.observe("live_display_update", {"display": False})
+    assert receipt.started and not receipt.finished.is_set()
+    receipt.observe("echo_state_update", {"state": "stop"})
+    assert await receipt.wait() > 0
 
 
 async def feedback(core, ws, uid, action, *, name=None, **data):

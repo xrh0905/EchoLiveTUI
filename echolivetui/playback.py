@@ -29,7 +29,13 @@ class PrintingReceipt:
         if not self.sent.is_set() or self.finished.is_set():
             return
         if action == "echo_printing":
-            self.started = data.get("username", "") == self.username and plain_message(data.get("message", "")) == self.message
+            # Echo Live's mood-symbol filter inserts invisible word boundaries.
+            username = data.get("username", "")
+            self.started = (
+                isinstance(username, str)
+                and username.replace("\u200b", "") == self.username.replace("\u200b", "")
+                and plain_message(data.get("message", "")).replace("\u200b", "") == self.message.replace("\u200b", "")
+            )
         elif action == "echo_state_update" and data.get("state") == "stop" and self.started:
             self.completed_at = time.monotonic()
             self.finished.set()
