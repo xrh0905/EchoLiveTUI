@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import os
+import re
 from pathlib import Path
 from dataclasses import dataclass
 import tempfile
@@ -26,6 +27,7 @@ class Field:
 
 
 FIELDS = {
+    "echolive.repository": Field("sheep-realms/Echo-Live", "Echo-Live 版本仓库"),
     "input.suggestions": Field(True, "命令与短码提示"),
     "input.format_bar": Field("context", "格式栏显示", ("context", "always", "never")),
     "input.preview": Field(True, "实时格式预览"),
@@ -90,6 +92,10 @@ def coerce(key: str, value):
         from .lan import valid_lan_ip
         if not valid_lan_ip(value):
             raise ValueError("局域网地址须为具体的非 loopback IPv4 地址")
+    if key == "echolive.repository":
+        value = value.strip()
+        if not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/[A-Za-z0-9_.-]+", value) or value.split("/")[1] in {".", ".."}:
+            raise ValueError("仓库格式须为 owner/repo，例如 sheep-realms/Echo-Live")
     return value
 
 

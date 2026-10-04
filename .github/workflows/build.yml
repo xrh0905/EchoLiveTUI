@@ -53,5 +53,5 @@ jobs:
           fi
           gh run download "$GITHUB_RUN_ID" --name windows-onefile --dir artifacts
           prerelease=()
-          if [[ "$GITHUB_REF_NAME" == *-* ]]; then prerelease=(--prerelease); fi
+          if [[ "$GITHUB_REF_NAME" == *-* || "$GITHUB_REF_NAME" =~ (a|b|rc)[0-9]+$ ]]; then prerelease=(--prerelease); fi
           gh release create "$GITHUB_REF_NAME" artifacts/*.exe artifacts/*.sha256 --verify-tag --generate-notes --title "EchoLiveTUI $GITHUB_REF_NAME" "${prerelease[@]}"

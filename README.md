@@ -2,7 +2,7 @@
 
 面向 Echo Live 的 Python / Textual 终端编辑器，优先满足直播时的文字输入、广播和端点控制。
 
-当前版本 0.4.0b1：Python 3.12+、Textual、aiohttp。主屏持续聚焦输入框，历史区域支持鼠标框选复制；设置、端点、连接和演出页替换历史区域，保留顶栏、工作区和底栏。承载模式提供 Echo-Live 字体与版本管理，演出页逐行发送等待实际打印完成，并支持暂停与连接恢复。
+当前版本 0.4.0b2：Python 3.12+、Textual、aiohttp。主屏持续聚焦输入框，历史区域支持鼠标框选复制；设置、端点、连接和演出页替换历史区域，保留顶栏、工作区和底栏。承载模式提供 Echo-Live 字体与版本管理，演出页逐行发送等待实际打印完成，并支持暂停与连接恢复。
 
 ## 启动
 
@@ -112,7 +112,7 @@ python scripts/build.py --mode onefile
 
 单文件使用 `--onefile-child-grace-time=infinity`，避免 Nuitka 父进程在 Ctrl+C 后强行结束启用了拦截的子进程。`/nocc` 动态控制 Ctrl+C，SIGTERM 仍请求退出。底栏「退出」可正常结束。
 
-GitHub Actions 在提交和 PR 上运行测试；手动运行打包工作流只产生 Windows onefile EXE 和 SHA256，推送 `v*` 标签时，全部测试与打包自检通过后发布 GitHub Release；带 `-alpha` / `-beta` 等后缀的标签发布为 Pre-Release。版本标签应与 pyproject.toml 的版本一致。Echo Live 资源和个人配置不包含在包中。
+GitHub Actions 在提交和 PR 上运行测试；手动运行打包工作流只产生 Windows onefile EXE 和 SHA256，推送 `v*` 标签时，全部测试与打包自检通过后发布 GitHub Release；带 `-alpha` / `-beta` 或 `aN` / `bN` / `rcN` 后缀的标签发布为 Pre-Release。版本标签应与 pyproject.toml 的版本一致。Echo Live 资源和个人配置不包含在包中。
 
 开发验证可执行 `python scripts/download-echolive.py` 下载上游最新发布版（不改动工作目录下已有的 Echo Live），再用 `scripts/browser-smoke.py 路径` 验证融合模式与 LAN editor。
 
@@ -129,7 +129,7 @@ GitHub Actions 在提交和 PR 上运行测试；手动运行打包工作流只�
 
 各页导航由居中 Tab 标签和下一行整行色带组成，中括号标识当前选中的页面；设置分类包含「所有设置」及各个分项。操作按钮统一单行、靠右固定在页面底部；演出页逐行开关、间隔和发送 / 返回共用一行，连接页客户端信息位于底部操作栏上方。格式操作使用中文名称。程序使用 `Capabilities` 位标志描述环境，目前仅定义 `HAS_ECHO_LIVE`，检测当前目录或 `EchoLive` 子目录，供页面可见性及后续 Companion 集成扩展使用。新配置默认使用「」引号和 20ms 模拟打字，已有配置保留显式值。
 
-检测到 Echo Live 时，设置导航均分为「TUI 设置」和「Echo-Live 设置」。后者使用侧边栏切换「字体」与「版本管理」：字体保存直接修改 `res/style/live-common/font-family.css` 的 `--echo-default-font-family` 变量，输入框只显示字体名称，读取时移除引号，保存时自动添加引号；支持逗号分隔的字体列表，`sans-serif` 等通用字体保留 CSS 关键词形式。保留其余样式，可恢复默认思源黑体，刷新前台页面生效。版本管理读取本地 `app.js`，按需通过 GitHub 发布 API 检查最新正式版并比较版本，可打开发布页查看更新。网络失败或请求受限时可重试，检查更新不会安装或替换本地文件。
+检测到 Echo Live 时，设置导航均分为「TUI 设置」和「Echo-Live 设置」。后者使用侧边栏切换「字体」与「版本管理」：字体保存直接修改 `res/style/live-common/font-family.css` 的 `--echo-default-font-family` 变量，输入框只显示字体名称，读取时移除引号，保存时自动添加引号；支持逗号分隔的字体列表，`sans-serif` 等通用字体保留 CSS 关键词形式。保留其余样式，可恢复默认思源黑体，刷新前台页面生效。版本管理读取本地 `app.js`，可保存 GitHub 仓库选项（`owner/repo`），默认仍为 `sheep-realms/Echo-Live`；检查更新时也会保存当前仓库，通过所选仓库的发布 API 获取最新正式版并比较版本，可打开其发布页查看更新。网络失败或请求受限时可重试，检查更新不会安装或替换本地文件。
 
 底栏的模拟打字与模拟停顿关闭时显示空心圆 `○`，开启时显示毫秒数；停顿按配置的打印步数乘以打印间隔换算，例如 10 步 × 20ms 显示 200ms。
 

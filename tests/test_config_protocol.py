@@ -63,3 +63,9 @@ def test_strict_values():
     for value in (True, 0, 65536, "oops"):
         with pytest.raises(ValueError):
             coerce("listen.port", value)
+
+
+@pytest.mark.parametrize("repository", ["", "owner", "owner/repo/extra", "https://github.com/owner/repo", "../repo", "owner/..", "owner/repo?x=y"])
+def test_invalid_release_repository(repository):
+    with pytest.raises(ValueError, match="owner/repo"):
+        coerce("echolive.repository", repository)

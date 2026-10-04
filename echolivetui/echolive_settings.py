@@ -6,10 +6,19 @@ import re
 
 import aiohttp
 
+from .config import FIELDS, coerce
+
 DEFAULT_FONT = "思源黑体"
 FONT_FILE = "res/style/live-common/font-family.css"
-RELEASE_API = "https://api.github.com/repos/sheep-realms/Echo-Live/releases/latest"
-RELEASE_PAGE = "https://github.com/sheep-realms/Echo-Live/releases/latest"
+DEFAULT_REPOSITORY = FIELDS["echolive.repository"].default
+GITHUB_API = "https://api.github.com"
+
+
+def release_page(repository=DEFAULT_REPOSITORY):
+    return f"https://github.com/{coerce('echolive.repository', repository)}/releases/latest"
+
+
+RELEASE_PAGE = release_page()
 FONT_DECLARATION = re.compile(r"(--echo-default-font-family\s*:\s*)([^;{}]+)(;)")
 FONT_NAME = r'''(?:"[^"'\\\r\n]+"|'[^"'\\\r\n]+'|[\w.-]+(?:[ \t]+[\w.-]+)*)'''
 FONT_VALUE = re.compile(FONT_NAME + r"(?:\s*,\s*" + FONT_NAME + r")*")
@@ -72,11 +81,13 @@ def release_notice(local: str | None, latest: str) -> str:
     return f"本地版本 {local} 高于最新正式版 {latest}"
 
 
-async def latest_release():
+async def latest_release(repository=DEFAULT_REPOSITORY):
+    repository = coerce("echolive.repository", repository)
+    page = release_page(repository)
     headers = {"Accept": "application/vnd.github+json", "User-Agent": "EchoLiveTUI", "X-GitHub-Api-Version": "2026-03-10"}
     try:
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15), headers=headers, trust_env=True) as session:
-            async with session.get(RELEASE_API) as response:
+            async with session.get(f"{GITHUB_API}/repos/{repository}/releases/latest") as response:
                 if response.status in {403, 429}:
                     raise ValueError("GitHub 请求受限，请稍后再试")
                 if response.status != 200:
@@ -85,9 +96,9 @@ async def latest_release():
         tag = data.get("tag_name", "")
         if version_key(tag) is None:
             raise ValueError("GitHub 返回的版本号无法识别")
-        url = data.get("html_url", RELEASE_PAGE)
-        if not isinstance(url, str) or not url.startswith("https://github.com/sheep-realms/Echo-Live/releases/"):
-            url = RELEASE_PAGE
+        url = data.get("html_url", page)
+        if not isinstance(url, str) or not url.startswith(f"https://github.com/{repository}/releases/"):
+            url = page
         return tag, url
     except (aiohttp.ClientError, TimeoutError, TypeError, AttributeError) as exc:
         raise ValueError("无法连接 GitHub，请检查网络后重试") from exc

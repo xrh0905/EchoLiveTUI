@@ -83,13 +83,13 @@ async def test_release_api_success_and_failures(monkeypatch, status, payload, ex
         assert request.headers["User-Agent"] == "EchoLiveTUI"
         return web.json_response(payload, status=status)
     app = web.Application()
-    app.router.add_get("/latest", handler)
+    app.router.add_get("/repos/sheep-realms/Echo-Live/releases/latest", handler)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "127.0.0.1", 0)
     await site.start()
     port = site._server.sockets[0].getsockname()[1]
-    monkeypatch.setattr(live, "RELEASE_API", f"http://127.0.0.1:{port}/latest")
+    monkeypatch.setattr(live, "GITHUB_API", f"http://127.0.0.1:{port}")
     try:
         if expected:
             with pytest.raises(ValueError, match=expected):
@@ -100,11 +100,34 @@ async def test_release_api_success_and_failures(monkeypatch, status, payload, ex
         await runner.cleanup()
 
 
+@pytest.mark.parametrize("url, expected", [
+    ("https://github.com/example/Echo-Live/releases/tag/v1.9.0", "https://github.com/example/Echo-Live/releases/tag/v1.9.0"),
+    (live.RELEASE_PAGE, "https://github.com/example/Echo-Live/releases/latest"),
+])
+async def test_selected_repository_api_and_release_link(monkeypatch, url, expected):
+    async def handler(request):
+        return web.json_response({"tag_name": "v1.9.0", "html_url": url})
+    app = web.Application()
+    app.router.add_get("/repos/example/Echo-Live/releases/latest", handler)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0)
+    await site.start()
+    port = site._server.sockets[0].getsockname()[1]
+    monkeypatch.setattr(live, "GITHUB_API", f"http://127.0.0.1:{port}")
+    try:
+        assert await live.latest_release(" example/Echo-Live ") == ("v1.9.0", expected)
+    finally:
+        await runner.cleanup()
+
+
 @pytest.mark.parametrize("width", [56, 80, 100])
 async def test_conditional_tabs_sidebar_font_and_update_ui(hosted, width, monkeypatch):
-    async def release():
+    checked = []
+    async def release(repository):
+        checked.append(repository)
         await asyncio.sleep(.01)
-        return "v1.9.0", live.RELEASE_PAGE
+        return "v1.9.0", live.release_page(repository)
     monkeypatch.setattr("echolivetui.echolive_panel.latest_release", release)
     app = EchoApp(Settings(hosted.parent / "s.yaml"), hosted.parent, start_server=False)
     async with app.run_test(size=(width, 30)) as pilot:
@@ -133,10 +156,21 @@ async def test_conditional_tabs_sidebar_font_and_update_ui(hosted, width, monkey
         assert live.read_font(hosted) == live.DEFAULT_FONT
         assert field.value == "思源黑体"
         await pilot.click("#echo-version-nav")
+        repository = page.query_one("#echo-repository", Input)
+        assert repository.value == "sheep-realms/Echo-Live"
+        repository.value = "example/Echo-Live"
+        await pilot.click("#echo-repository-save")
+        assert Settings(app.core.settings.path)["echolive.repository"] == "example/Echo-Live"
         await pilot.click("#echo-check")
         await pilot.pause()
         assert "有更新" in str(page.query_one("#echo-release-state", Static).content)
         assert not page.query_one("#echo-check", Button).disabled
+        assert checked == ["example/Echo-Live"]
+        assert page.query_one(EchoLivePanel).release_url == "https://github.com/example/Echo-Live/releases/latest"
+        repository.value = "../bad"
+        await pilot.click("#echo-repository-save")
+        assert "owner/repo" in str(page.query_one("#echo-settings-error", Static).content)
+        assert app.core.settings["echolive.repository"] == "example/Echo-Live"
         assert page.query_one("#echo-local-version", Static).content == "本地版本：1.8.12"
         for button in page.query(".actions Button"):
             if button.display and button.region.width:

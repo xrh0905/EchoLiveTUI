@@ -526,7 +526,9 @@ class ComposeScreen(HistoryPage):
                 if self.next_row >= len(lines) and area.cursor_location == (len(lines) - 1, len(lines[-1])):
                     start_row = self.next_row
                 completed_at = await self.app.core.wait_for_printing(self.pending_playback)
-                await asyncio.sleep(max(0, completed_at + interval - time.monotonic()))
+                deadline = completed_at + interval
+                while (remaining := deadline - time.monotonic()) > 0:
+                    await asyncio.sleep(remaining)
                 self.pending_playback = []
             for row in range(start_row, len(lines)):
                 self.next_row = row
@@ -540,7 +542,10 @@ class ComposeScreen(HistoryPage):
                 completed_at = await self.app.core.wait_for_printing(self.pending_playback)
                 if any(line.strip() for line in lines[row + 1:]):
                     self.query_one("#performance-state", Static).update(f"行间等待 · {row + 1}/{len(lines)}")
-                    await asyncio.sleep(max(0, completed_at + interval - time.monotonic()))
+                    deadline = completed_at + interval
+                    # Windows timers may wake early; retain the full interval.
+                    while (remaining := deadline - time.monotonic()) > 0:
+                        await asyncio.sleep(remaining)
                 self.pending_playback = []
             self.app.core.compose_draft = ""
             self.dismiss()
