@@ -114,8 +114,8 @@ class Core:
     def has_output(self):
         return bool(self.hub.targets() or self.hub.history.receivers() or self.settings["osc.enable"])
 
-    def submit(self, text, *, playback=None):
-        prepared = prepare(text, self.settings, self.paren_once)
+    def submit(self, text, *, playback=None, tracks=None):
+        prepared = prepare(text, self.settings, self.paren_once, tracks=tracks)
         targets = self.hub.targets()
         history_count = len(self.hub.history.receivers())
         if not targets and not history_count and not self.settings["osc.enable"]:

@@ -76,6 +76,30 @@ async def test_local_editor_message_keeps_lan_typewriting_out_of_osc(tmp_path, o
     await core.hub.disconnect(peer)
 
 
+async def test_lan_tracks_keep_styles_and_send_only_main_to_osc_and_history(tmp_path, osc):
+    import copy
+    core = make_core(tmp_path, peers=("live1", "live2"))
+    core.settings.values["history.hide_latest"] = False
+    core.hub.peers["history"] = Peer(None, Profile("history", role="history"))
+    data = {"username": "手机", "messages": [{"message": "主轨", "track": [
+        {"message": [{"text": "子轨", "style": {"super": True}, "speed": 42}],
+         "data": {"printSpeed": 60}}]}]}
+    before = copy.deepcopy(data)
+    peer = await editor_message(core, data)
+    assert data == before
+    assert chatbox(osc.calls) == [("/chatbox/input", ["主轨", True])]
+    for uid in ("live1", "live2"):
+        frame, _ = core.hub.peers[uid].queue.get_nowait()
+        child = frame["data"]["messages"][0]["track"][0]
+        assert child["message"][0]["typewrite"]
+        assert child["message"][0]["style"]["super"] and child["message"][0]["speed"] == 42
+        assert child["data"] == {"printSpeed": 60}
+    history, _ = core.hub.peers["history"].control.get_nowait()
+    assert history["data"]["message"] == "主轨"
+    assert core.hub.peers["history"].control.empty()
+    await core.hub.disconnect(peer)
+
+
 async def test_osc_disabled_stays_silent(tmp_path, osc):
     core = make_core(tmp_path)
     core.settings.values["osc.enable"] = False

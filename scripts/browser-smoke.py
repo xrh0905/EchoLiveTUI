@@ -15,7 +15,7 @@ from echolivetui.protocol import version_tuple
 
 async def main():
     root = Path(sys.argv[1] if len(sys.argv) > 1 else ".reference/Echo-Live").resolve()
-    before = {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in ("config.js", "res/class/EchoLiveSystem.js", "res/class/UniverseWindow.js") if (root / name).is_file()}
+    before = {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in ("config.js", "res/class/Echo.js", "res/class/EchoLive.js", "res/class/EchoLiveTools.js", "res/script/live.js", "res/class/EchoLiveSystem.js", "res/class/UniverseWindow.js") if (root / name).is_file()}
     with tempfile.TemporaryDirectory() as temporary:
         settings = Settings(Path(temporary) / "s.yaml")
         settings.values.update({"message.typewriting": False, "message.quote": False, "typing.enable": True})
@@ -108,6 +108,21 @@ async def main():
                         assert symbols in ''.join(await page.locator('.echo-text-bold').all_text_contents()).replace('\u200b', '')
                 settings.values.update({"message.typewriting": False, "message.typewriting_scheme": "pinyin"})
                 print('PASS literal symbol runs: pinyin, zhuyin, long punctuation, emoji, styles and print completion', flush=True)
+                if version_tuple(core.server.hosting.version) >= (1, 9, 0):
+                    playback = []
+                    core.submit("TRACK_MAIN x@^2@r", tracks=[
+                        {"message": [{"text": "子轨一", "style": {"italic": True}}], "data": {"printSpeed": 150}},
+                        {"message": "SUB_TRACK_TWO", "data": {"printSpeed": 100}},
+                    ], playback=playback)
+                    await pages[0].wait_for_function("echo.state === 'wait_subtrack'", polling=20)
+                    assert not all(receipt.finished.is_set() for receipt in playback)
+                    await core.wait_for_printing(playback)
+                    for page in pages[:2]:
+                        tracks = await page.locator(".echo-track").all_text_contents()
+                        assert len(tracks) == 3 and tracks[1:] == ["子轨一", "SUB_TRACK_TWO"], tracks
+                    history = await pages[2].locator("#echo-live-history-message-list").text_content()
+                    assert history.count("TRACK_MAIN") == 1 and "SUB_TRACK_TWO" not in history and "子轨一" not in history
+                    print("PASS parallel tracks: internal submit, slow child completion and main-only history", flush=True)
                 editor = await context.new_page()
                 editor.on("pageerror", lambda error: errors.append(error.stack))
                 await editor.goto(f"http://{lan}:{port}/editor.html")

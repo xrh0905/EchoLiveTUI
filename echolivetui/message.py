@@ -141,8 +141,13 @@ def typewrite_incoming(data: dict, scheme: str) -> dict:
     messages = result.get("messages")
     if isinstance(messages, list):
         for index, message in enumerate(messages):
-            if isinstance(message, dict) and "message" in message:
-                message["message"] = transform(message["message"])
+            if isinstance(message, dict):
+                paragraphs = [message]
+                if isinstance(message.get("track"), list):
+                    paragraphs.extend(message["track"])
+                for paragraph in paragraphs:
+                    if isinstance(paragraph, dict) and "message" in paragraph:
+                        paragraph["message"] = transform(paragraph["message"])
             elif isinstance(message, str):
                 messages[index] = {"message": transform(message)}
     return result
@@ -338,8 +343,8 @@ def _coerce_positive_int(value: Any) -> Optional[int]:
 
 def _effective_print_speed(config: Dict[str, Any], message: Dict[str, Any]) -> int:
     data_field = message.get("data")
-    speed = None
-    if isinstance(data_field, dict):
+    speed = _coerce_positive_int(message.get("speed"))
+    if speed is None and isinstance(data_field, dict):
         speed = _coerce_positive_int(data_field.get("printSpeed"))
 
     if speed is None:
@@ -542,12 +547,14 @@ def get_delay(config: Dict[str, Any], messages: Iterable[Dict[str, Any]]) -> int
     delay = 0
     for message in messages:
         speed = _effective_print_speed(config, message)
-        text = message.get("text", "")
+        text = message.get("typewrite", message.get("text", ""))
         for char in text:
             if char in ALPHABETIC:
                 delay += speed
             else:
                 delay += speed * 2
+        if "typewrite" in message:
+            delay += speed  # The committed text replaces its phonetics in one tick.
         pause_duration = message.get("pause", 0)
         if isinstance(pause_duration, int):
             delay += speed * pause_duration * 2
