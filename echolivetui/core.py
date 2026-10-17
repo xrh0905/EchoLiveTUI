@@ -4,7 +4,6 @@ import asyncio
 import copy
 from pathlib import Path
 import time
-from pythonosc.udp_client import SimpleUDPClient
 from .config import coerce
 from .hub import Hub
 from .message import format_username
@@ -16,6 +15,9 @@ from .capabilities import Capabilities
 from .playback import DeliveryUnavailable
 from .history import MessageReport
 
+# Remote listeners expire the typing hint themselves; OSC needs an explicit stop.
+TYPING_EXPIRY = 3.0
+
 
 class Core:
     def __init__(self, settings, cwd: Path, report=lambda _: None):
@@ -25,10 +27,14 @@ class Core:
         self.capabilities = Capabilities.HAS_ECHO_LIVE if self.server.hosting.root else Capabilities.NONE
         self.paren_once = False
         self.typing_task = None
+        self.typing_expiry = None
         self.last_typing = 0.0
         self.typing_state = "关闭"
-        self.osc_error = ""
         self.compose_draft = ""
+
+    @property
+    def osc_error(self):
+        return self.hub.osc.error
 
     async def start(self):
         try:
@@ -109,14 +115,7 @@ class Core:
         if not targets and not history_count and not self.settings["osc.enable"]:
             raise DeliveryUnavailable("没有可发送的字幕端，草稿已保留；请连接或选择端点")
         count = self.hub.broadcast(prepared.data, prepared.delay, playback=playback)
-        osc_sent = False
-        if self.settings["osc.enable"]:
-            try:
-                SimpleUDPClient(self.settings["osc.host"], self.settings["osc.port"]).send_message("/chatbox/input", [prepared.plain, True])
-                osc_sent, self.osc_error = True, ""
-            except Exception as exc:
-                self.osc_error = str(exc)
-                self.hub.log(f"OSC 发送失败：{exc}", "warn")
+        osc_sent = self.hub.osc.send_text(prepared.plain)
         if not count and not history_count and not osc_sent:
             raise ValueError("OSC 发送失败，草稿已保留")
         self.paren_once = False
@@ -138,6 +137,8 @@ class Core:
             await asyncio.gather(*tasks, return_exceptions=True)
 
     def cancel_typing(self):
+        self._stop_typing_expiry()
+        self.hub.osc.send_typing(False)
         if self.typing_task:
             self.typing_task.cancel()
             self.typing_task = None
@@ -155,8 +156,24 @@ class Core:
         await asyncio.sleep(max(0, 1.5 - (time.monotonic() - self.last_typing)))
         self.last_typing = time.monotonic()
         count = self.hub.typing(format_username(self.settings.group("message")))
+        osc = self.hub.osc.send_typing(True)
         unknown = any(p.profile.capabilities["typing"] is None for p in self.hub.targets())
-        self.typing_state = (f"已发 {count} 端" if count else "无支持目标") + (" · 默认兼容" if unknown else "")
+        sent = [part for part in (f"{count} 端" if count else "", "OSC" if osc else "") if part]
+        self.typing_state = (f"已发 {' + '.join(sent)}" if sent else "无支持目标") + (" · 默认兼容" if unknown else "")
+        if self.hub.osc.typing:
+            # Remote listeners expire the hint on their own; OSC keeps it until told otherwise.
+            self._stop_typing_expiry()
+            self.typing_expiry = asyncio.create_task(self._expire_typing())
+
+    def _stop_typing_expiry(self):
+        if self.typing_expiry:
+            self.typing_expiry.cancel()
+            self.typing_expiry = None
+
+    async def _expire_typing(self):
+        await asyncio.sleep(TYPING_EXPIRY)
+        self.typing_expiry = None
+        self.hub.osc.send_typing(False)
 
     async def close(self):
         self.cancel_typing()

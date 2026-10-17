@@ -23,7 +23,7 @@ def test_osc_once_per_submission_not_per_live(tmp_path, monkeypatch):
             pass
         def send_message(self, address, args):
             calls.append((address, args))
-    monkeypatch.setattr("echolivetui.core.SimpleUDPClient", OSC)
+    monkeypatch.setattr("echolivetui.osc.SimpleUDPClient", OSC)
     core = make_core(tmp_path)
     core.settings.values["osc.enable"] = True
     core.submit("**text**")

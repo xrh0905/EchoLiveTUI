@@ -8,6 +8,7 @@ import time
 from .protocol import Profile, Sender, target_matches, validate_envelope, version_tuple
 from .history import HistoryDelivery, MessageReport, entries_from_data
 from .message import typewrite_incoming
+from .osc import OscDelivery
 from .playback import PrintingReceipt
 
 
@@ -104,6 +105,7 @@ class Hub:
         self.sender = Sender()
         self.peers: dict[str, Peer] = {}
         self.history = HistoryDelivery(self)
+        self.osc = OscDelivery(self)
 
     def log(self, text, level="info"):
         levels = {"error": 0, "warn": 1, "info": 2, "debug": 3}
@@ -193,6 +195,9 @@ class Hub:
         if envelope.get("target") == "@__ws_server":
             return peer
         if action == "message_data":
+            # OSC takes the submitted plain text before the LAN simulated-typing
+            # rewrite, which splits plain strings into per-token pinyin segments.
+            self.osc.publish(entries_from_data(envelope.get("data", {})))
             if remote and self.settings["lan.typewriting"]:
                 envelope = {**envelope, "data": typewrite_incoming(envelope.get("data", {}), self.settings["message.typewriting_scheme"])}
             entries = list(entries_from_data(envelope.get("data", {})))
