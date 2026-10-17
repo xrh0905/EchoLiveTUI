@@ -65,29 +65,35 @@ class Core:
                 raise ValueError(f"设置冲突：{key} 已被其他操作修改；请丢弃草稿后重试")
             candidate[key] = coerce(key, value)
         self.settings.validate(candidate)
-        lan_host = await asyncio.to_thread(choose_address, candidate["lan.host"]) if candidate["lan.enable"] else None
-        if lan_host and not self.server.hosting.root:
-            raise ValueError("未识别 Echo Live 目录，无法启用远程 editor")
+        network_changed = any(candidate[key] != self.settings[key] for key in
+                              ("listen.host", "listen.port", "lan.enable", "lan.host"))
+        # The connection page can explicitly retry an unchanged LAN setup.
+        configure_network = network_changed or ("lan.enable" in updates and candidate["lan.enable"])
+        if configure_network:
+            lan_host = await asyncio.to_thread(choose_address, candidate["lan.host"]) if candidate["lan.enable"] else None
+            if lan_host and not self.server.hosting.root:
+                raise ValueError("未识别 Echo Live 目录，无法启用远程 editor")
         old_hide_latest = self.settings["history.hide_latest"]
         old_address = self.server.address
         old_lan = self.server.lan_address
         new_address = candidate["listen.host"], candidate["listen.port"]
         changed = old_address is not None and old_address != new_address
         try:
-            if changed:
+            if configure_network and changed:
                 # Remove secondary bind before moving the local bind (same-port
                 # changes can otherwise collide with the old LAN listener).
                 await self.server.set_lan(None)
                 await self.server.start(*new_address)
-            if self.server.site is None and self.server.runner is not None:
+            if configure_network and self.server.site is None and self.server.runner is not None:
                 await self.server.start(*new_address)
-            await self.server.set_lan(lan_host)
+            if configure_network:
+                await self.server.set_lan(lan_host)
             self.settings.save(candidate)
         except Exception:
-            if self.server.address != old_address and old_address:
+            if configure_network and self.server.address != old_address and old_address:
                 await self.server.set_lan(None)
                 await self.server.start(*old_address)
-            if self.server.site:
+            if configure_network and self.server.site:
                 await self.server.set_lan(old_lan[0] if old_lan else None)
             raise
         if self.server.lan_address != old_lan:

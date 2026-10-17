@@ -4,8 +4,10 @@ from echolivetui.config import Settings
 from echolivetui.ui import EchoApp, SettingsScreen, ComposeScreen
 
 
-async def test_main_layout_settings_and_draft(tmp_path):
+async def test_main_layout_settings_and_draft(tmp_path, monkeypatch):
     app = EchoApp(Settings(tmp_path / "s.yaml"), tmp_path, start_server=False)
+    app.core.settings.values.update({"lan.enable": True, "lan.host": "192.168.99.99"})
+    monkeypatch.setattr("echolivetui.lan.interfaces", lambda: [])
     async with app.run_test(size=(80, 24)) as pilot:
         await pilot.pause()
         assert app.query_one("#log", RichLog).size.height >= 8

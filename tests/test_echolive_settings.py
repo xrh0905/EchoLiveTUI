@@ -130,6 +130,8 @@ async def test_conditional_tabs_sidebar_font_and_update_ui(hosted, width, monkey
         return "v1.9.0", live.release_page(repository)
     monkeypatch.setattr("echolivetui.echolive_panel.latest_release", release)
     app = EchoApp(Settings(hosted.parent / "s.yaml"), hosted.parent, start_server=False)
+    app.core.settings.values.update({"lan.enable": True, "lan.host": "192.168.99.99"})
+    monkeypatch.setattr("echolivetui.lan.interfaces", lambda: [])
     async with app.run_test(size=(width, 30)) as pilot:
         app.open_screen("settings")
         await pilot.pause()

@@ -22,8 +22,10 @@ def test_connect_replaces_lan_in_commands_help_and_scripts():
         parse("/connect", script=True)
 
 
-async def test_quote_and_failed_once(tmp_path):
+async def test_quote_and_failed_once(tmp_path, monkeypatch):
     core = Core(Settings(tmp_path / "s.yaml"), tmp_path)
+    core.settings.values.update({"lan.enable": True, "lan.host": "192.168.99.99"})
+    monkeypatch.setattr("echolivetui.lan.interfaces", lambda: [])
     await execute(core, parse("/quote jp"))
     await execute(core, parse("/quote off"))
     await execute(core, parse("/quote on"))

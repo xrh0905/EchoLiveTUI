@@ -2,6 +2,7 @@ import asyncio
 from pathlib import Path
 import signal
 import socket
+from unittest.mock import AsyncMock, Mock
 import pytest
 from aiohttp import ClientSession
 from echolivetui.config import Settings
@@ -97,6 +98,102 @@ async def test_enabling_without_editor_does_not_save(tmp_path):
         await core.apply({"lan.enable": True})
     assert not core.settings["lan.enable"]
     assert not core.settings.path.exists()
+
+
+@pytest.mark.parametrize("updates", [
+    {}, {"message.username": "Changed"}, {"osc.port": 9001},
+    {"input.preview": False}, {"log.level": "debug"},
+    {"echolive.repository": "sheep-realms/Echo-Live"}, {"lan.typewriting": False},
+])
+@pytest.mark.parametrize("active", [False, True])
+async def test_unrelated_save_does_not_revalidate_or_rebind_lan(tmp_path, monkeypatch, updates, active):
+    core = Core(Settings(tmp_path / "s.yaml"), tmp_path)
+    core.settings.values.update({"lan.enable": True, "lan.host": "192.168.99.99"})
+    core.server.address = ("127.0.0.1", 3000)
+    core.server.lan_address = ("192.168.99.99", 3000) if active else None
+    choose = Mock(side_effect=ValueError("所选地址不属于当前启用的本机网卡，请刷新列表或更换地址"))
+    monkeypatch.setattr("echolivetui.core.choose_address", choose)
+    monkeypatch.setattr(core.server, "start", AsyncMock())
+    monkeypatch.setattr(core.server, "set_lan", AsyncMock())
+    await core.apply(updates)
+    choose.assert_not_called()
+    core.server.start.assert_not_called()
+    core.server.set_lan.assert_not_called()
+    reloaded = Settings(core.settings.path)
+    assert reloaded["lan.enable"] and reloaded["lan.host"] == "192.168.99.99"
+    assert all(reloaded[key] == value for key, value in updates.items())
+
+
+@pytest.mark.parametrize("updates", [
+    {"lan.enable": True}, {"lan.host": "192.168.99.98"},
+    {"listen.port": 3001}, {"listen.host": "0.0.0.0"},
+])
+async def test_network_change_or_explicit_retry_still_validates_lan(tmp_path, monkeypatch, updates):
+    core = Core(Settings(tmp_path / "s.yaml"), tmp_path)
+    core.settings.values.update({"lan.enable": True, "lan.host": "192.168.99.99"})
+    monkeypatch.setattr("echolivetui.lan.interfaces", lambda: [])
+    before = dict(core.settings.values)
+    with pytest.raises(ValueError, match="所选地址不属于"):
+        await core.apply(updates)
+    assert core.settings.values == before
+    assert not core.settings.path.exists()
+
+
+async def test_disable_stale_lan_without_address_validation(tmp_path, monkeypatch):
+    core = Core(Settings(tmp_path / "s.yaml"), tmp_path)
+    core.settings.values.update({"lan.enable": True, "lan.host": "192.168.99.99"})
+    choose = Mock(side_effect=AssertionError("must not enumerate interfaces"))
+    monkeypatch.setattr("echolivetui.core.choose_address", choose)
+    monkeypatch.setattr(core.server, "set_lan", AsyncMock())
+    await core.apply({"lan.enable": False})
+    choose.assert_not_called()
+    core.server.set_lan.assert_awaited_once_with(None)
+    assert not core.settings["lan.enable"]
+
+
+async def test_lan_save_failure_restores_previous_listener(tmp_path, monkeypatch):
+    core = Core(Settings(tmp_path / "s.yaml"), tmp_path)
+    core.settings.values.update({"lan.enable": True, "lan.host": "192.168.1.3"})
+    core.server.address = ("127.0.0.1", 3000)
+    core.server.lan_address = ("192.168.1.3", 3000)
+    core.server.site = object()
+    core.server.hosting.root = tmp_path
+    monkeypatch.setattr("echolivetui.core.choose_address", lambda requested: requested)
+    monkeypatch.setattr(core.server, "set_lan", AsyncMock())
+    monkeypatch.setattr(core.settings, "save", Mock(side_effect=OSError("disk full")))
+    with pytest.raises(OSError, match="disk full"):
+        await core.apply({"lan.host": "192.168.1.4"})
+    assert [call.args for call in core.server.set_lan.await_args_list] == [("192.168.1.4",), ("192.168.1.3",)]
+    assert core.settings["lan.host"] == "192.168.1.3"
+
+
+@pytest.mark.parametrize("failure", ["bind", "save"])
+async def test_listen_change_failure_restores_network(tmp_path, monkeypatch, failure):
+    core = Core(Settings(tmp_path / "s.yaml"), tmp_path)
+    core.settings.values.update({"lan.enable": True, "lan.host": "192.168.1.3"})
+    core.server.address = ("127.0.0.1", 3000)
+    core.server.lan_address = ("192.168.1.3", 3000)
+    core.server.site = object()
+    core.server.hosting.root = tmp_path
+    monkeypatch.setattr("echolivetui.core.choose_address", lambda requested: requested)
+
+    async def start(host, port):
+        if failure == "bind" and port == 3001:
+            raise ValueError("bind failed")
+        core.server.address = (host, port)
+
+    async def set_lan(host):
+        core.server.lan_address = (host, core.server.address[1]) if host else None
+
+    monkeypatch.setattr(core.server, "start", start)
+    monkeypatch.setattr(core.server, "set_lan", set_lan)
+    if failure == "save":
+        monkeypatch.setattr(core.settings, "save", Mock(side_effect=OSError("disk full")))
+    with pytest.raises((ValueError, OSError)):
+        await core.apply({"listen.port": 3001})
+    assert core.server.address == ("127.0.0.1", 3000)
+    assert core.server.lan_address == ("192.168.1.3", 3000)
+    assert core.settings["listen.port"] == 3000
 
 
 def test_unknown_client_assumes_typing_but_known_old_does_not():
