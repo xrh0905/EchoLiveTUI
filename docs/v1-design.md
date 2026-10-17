@@ -170,6 +170,10 @@ flowchart TD
 
 内部边界按职责组织为 `core`、`commands`、`message`、`echo`、`hosting`、`ui`、`config`。不在新 UI 外包一层旧 `EchoServer`；迁移旧消息纯函数，按本节规范重建命令与设置体系，重写生命周期与 I/O 边界。
 
+0.5.0 的实际内部接口 `prepare(text, settings, paren_once=False, *, tracks=None)` 与 `Core.submit(text, *, playback=None, tracks=None)` 支持 Echo-Live 1.9.0 子轨道。`tracks` 为包含 `message` 的上游段落对象列表，仅允许一层；深拷贝调用方数据，缺省速度继承消息配置，已有样式、速度、停顿和 `typewrite` 保留。模拟打字按轨道处理，耗时估算取最长轨道；历史、OSC 与回报匹配只取主轨，等待上游全部轨道结束后的 `stop`。不增加轨道 UI、命令或配置。
+
+普通设置保存只验证配置值；仅监听地址/端口、LAN 开关/地址实际变更，或显式启用/重试 LAN 时重新校验网卡并配置监听。无关设置保存不得因失效 LAN 地址失败或关闭已有连接。
+
 | 接口/类型 | 约定 |
 | --- | --- |
 | `Application.submit(text)` | 区分显式命令和文字；生成一次提交，分配路由目标和可选 OSC 副作用 |
