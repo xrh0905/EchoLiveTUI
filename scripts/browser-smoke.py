@@ -10,6 +10,7 @@ from playwright.async_api import async_playwright
 from echolivetui.config import Settings
 from echolivetui.core import Core
 from echolivetui.lan import choose_address
+from echolivetui.protocol import version_tuple
 
 
 async def main():
@@ -75,6 +76,16 @@ async def main():
                 assert "FORMAT_BOLD" in "".join(await pages[0].locator(".echo-text-bold").all_text_contents())
                 assert "RAINBOW" in "".join(await pages[0].locator(".echo-text-rainbow").all_text_contents())
                 assert await pages[0].evaluate("window.eltuiShoutSeen")
+                if version_tuple(core.server.hosting.version) >= (1, 9, 0):
+                    playback = []
+                    core.submit("SCRIPT x@^2@r H@_2@rO", playback=playback)
+                    await core.wait_for_printing(playback)
+                    for page in pages[:2]:
+                        assert await page.locator(".echo-text-super").text_content() == "2"
+                        assert await page.locator(".echo-text-sub").text_content() == "2"
+                        assert await page.locator(".echo-text-super").evaluate("e => getComputedStyle(e).verticalAlign") == "super"
+                        assert await page.locator(".echo-text-sub").evaluate("e => getComputedStyle(e).verticalAlign") == "sub"
+                    print("PASS superscript/subscript: TUI codes, wire styles and browser rendering", flush=True)
                 symbols = "————……！！！？？？💥👩‍💻"
                 settings.values["message.typewriting"] = True
                 for scheme in ("pinyin", "zhuyin"):

@@ -232,7 +232,7 @@ def _apply_fast_formatting(text: str, base_style: Dict[str, Any]) -> List[Dict[s
         code = text[index + 1]
         handled = True
 
-        if code in {"b", "i", "u", "s"}:
+        if code in {"b", "i", "u", "s", "^", "_"}:
             push_buffer()
             if code == "b":
                 current_style["bold"] = True
@@ -242,6 +242,10 @@ def _apply_fast_formatting(text: str, base_style: Dict[str, Any]) -> List[Dict[s
                 current_style["underline"] = True
             elif code == "s":
                 current_style["strikethrough"] = True
+            elif code == "^":
+                current_style["super"] = True
+            elif code == "_":
+                current_style["sub"] = True
             index += 2
         elif code in {"+", "-"}:
             push_buffer()

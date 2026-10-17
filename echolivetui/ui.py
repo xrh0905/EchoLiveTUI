@@ -34,6 +34,15 @@ from . import __version__
 class DisplayText(Static):
     ALLOW_SELECT = False
 
+
+class MessagePreview(Static):
+    def show_preview(self, text, settings):
+        self.display = settings["input.preview"]
+        if self.display:
+            content = preview(text, settings)
+            self.styles.height = content.plain.count("\n") + 1
+            self.update(content)
+
     def get_selection(self, selection):
         # Textual may include the drag end widget even with ALLOW_SELECT=False.
         return None
@@ -160,7 +169,7 @@ class FormatLink(DisplayText, can_focus=False):
 
 class FormatBar(Horizontal):
     def compose(self):
-        for label, code in (("粗体", "@b"), ("斜体", "@i"), ("下划线", "@u"), ("删除线", "@s"), ("重置", "@r"), ("放大", "@+"), ("缩小", "@-"), ("颜色", "@[#66ccff]"), ("喊叫", "@shout"), ("彩虹", "@rainbow")):
+        for label, code in (("粗体", "@b"), ("斜体", "@i"), ("下划线", "@u"), ("删除线", "@s"), ("上标", "@^"), ("下标", "@_"), ("重置", "@r"), ("放大", "@+"), ("缩小", "@-"), ("颜色", "@[#66ccff]"), ("喊叫", "@shout"), ("彩虹", "@rainbow")):
             link = FormatLink(label, name=code)
             link.tooltip = SHORTCODES[code] + " · " + code + " · 应用于选中文字，未选中时插入短码"
             yield link
@@ -452,7 +461,7 @@ class ComposeScreen(HistoryPage):
             yield ComposeArea(self.app.core.compose_draft, id="multiline", tab_behavior="focus", show_line_numbers=True)
             yield Static("", id="compose-suggestions", markup=False)
             yield FormatBar(id="compose-format")
-            yield Static("", id="compose-preview", markup=False)
+            yield MessagePreview("", id="compose-preview", markup=False)
             yield Static("", id="compose-error", markup=False)
             with Horizontal(id="performance-controls"):
                 yield Checkbox("逐行发送", id="line-mode", compact=True)
@@ -464,14 +473,13 @@ class ComposeScreen(HistoryPage):
 
     def on_mount(self):
         self.query_one(TextArea).focus()
-        self.query_one("#compose-preview", Static).update(preview(self.app.core.compose_draft, self.app.core.settings))
-        self.query_one("#compose-preview").display = self.app.core.settings["input.preview"]
+        self.query_one("#compose-preview", MessagePreview).show_preview(self.app.core.compose_draft, self.app.core.settings)
 
     @on(TextArea.Changed)
     def changed(self, event):
         self.app.core.compose_draft = event.text_area.text
         self.app.core.input_changed(event.text_area.text, literal=True)
-        self.query_one("#compose-preview", Static).update(preview(event.text_area.text, self.app.core.settings))
+        self.query_one("#compose-preview", MessagePreview).show_preview(event.text_area.text, self.app.core.settings)
         row, column = event.text_area.cursor_location
         offset = sum(len(line) + 1 for line in event.text_area.text.split("\n")[:row]) + column
         choices, _ = completion(event.text_area.text, offset)
@@ -931,7 +939,7 @@ class EchoApp(App, inherit_bindings=False):
             yield DisplayText("", id="context", markup=False)
             yield Static("", id="suggestions", markup=False)
             yield FormatBar(id="main-format")
-            yield Static("", id="preview", markup=False)
+            yield MessagePreview("", id="preview", markup=False)
             yield ComposerInput(placeholder="输入消息，或 /help", id="entry")
             with Horizontal(id="submission"):
                 yield DisplayText("", id="hints", markup=False)
@@ -987,10 +995,8 @@ class EchoApp(App, inherit_bindings=False):
         preview_key = (entry.value, tuple(s.values.items()))
         if getattr(self, "preview_key", None) != preview_key:
             self.preview_key = preview_key
-            display = self.query_one("#preview", Static)
-            display.display = s["input.preview"]
-            if display.display:
-                display.update(preview(entry.value[1:] if entry.value.startswith("//") else entry.value, s) if not entry.value.startswith("/") or entry.value.startswith("//") else "")
+            display = self.query_one("#preview", MessagePreview)
+            display.show_preview(entry.value[1:] if entry.value.startswith("//") else entry.value if not entry.value.startswith("/") else "", s)
         quote = "".join(quote_symbols(s)) if s["message.quote"] else "关"
         paren = "".join(bracket_symbols(s.group("message"))) if s["message.username_brackets"] or core.paren_once else "无"
         basic = f"引号 {quote} 姓名 {paren} 后缀 {s['message.suffix_value'] if s['message.suffix'] else '无'}"
