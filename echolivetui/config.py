@@ -8,6 +8,7 @@ from pathlib import Path
 from dataclasses import dataclass
 import tempfile
 import yaml
+from .languages import LANGUAGES
 
 
 @dataclass(frozen=True)
@@ -38,6 +39,10 @@ FIELDS = {
     "lan.enable": Field(False, "局域网发送模式"),
     "lan.host": Field("", "局域网 IPv4（留空自动选择）"),
     "lan.typewriting": Field(True, "LAN 入站模拟打字"),
+    "multitrack.enable": Field(False, "多轨道自动翻译"),
+    "multitrack.source_language": Field("", "主轨语言"),
+    "multitrack.target_languages": Field([], "子轨语言（按顺序）"),
+    "multitrack.skip_errors": Field(False, "翻译失败仍发送（仅本机）"),
     "message.username": Field("Someone", "说话人"),
     "message.username_brackets": Field(True, "姓名括号"),
     "message.username_bracket_style": Field("square", "姓名括号样式", ("square", "round", "corner", "custom")),
@@ -69,6 +74,14 @@ def coerce(key: str, value):
     if key not in FIELDS:
         raise ValueError(f"未知设置：{key}")
     f = FIELDS[key]
+    if isinstance(f.default, list):
+        if isinstance(value, str):
+            value = [code.strip() for code in value.split(",") if code.strip()]
+        if not isinstance(value, list) or not all(isinstance(code, str) and code in LANGUAGES for code in value):
+            raise ValueError("子轨语言须为供应商语言代码列表，例如 en,ja")
+        if len(value) != len(set(value)):
+            raise ValueError("子轨语言不可重复")
+        return value.copy()
     if isinstance(f.default, bool):
         if isinstance(value, str) and value.lower() in ("on", "off", "true", "false"):
             value = value.lower() in ("on", "true")
@@ -96,13 +109,17 @@ def coerce(key: str, value):
         value = value.strip()
         if not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/[A-Za-z0-9_.-]+", value) or value.split("/")[1] in {".", ".."}:
             raise ValueError("仓库格式须为 owner/repo，例如 sheep-realms/Echo-Live")
+    if key == "multitrack.source_language":
+        value = value.strip()
+        if value and value not in LANGUAGES:
+            raise ValueError("主轨语言须为供应商语言代码，留空自动检测")
     return value
 
 
 class Settings:
     def __init__(self, path: Path):
         self.path = path
-        self.values = {k: f.default for k, f in FIELDS.items()}
+        self.values = {k: copy.deepcopy(f.default) for k, f in FIELDS.items()}
         self.routing = {"targets": [], "exclude": [], "overrides": {}}
         self.load_error = ""
         if path.exists():
@@ -131,7 +148,7 @@ class Settings:
                 self.validate_routing(self.routing)
             except (ValueError, OSError, yaml.YAMLError) as exc:
                 self.load_error = str(exc)
-                self.values = {k: f.default for k, f in FIELDS.items()}
+                self.values = {k: copy.deepcopy(f.default) for k, f in FIELDS.items()}
                 self.routing = {"targets": [], "exclude": [], "overrides": {}}
 
     def __getitem__(self, key):
@@ -143,6 +160,8 @@ class Settings:
     def validate(self, values):
         for key, value in values.items():
             coerce(key, value)
+        if values["multitrack.enable"] and not values["multitrack.target_languages"]:
+            raise ValueError("启用多轨道前请添加至少一种子轨语言")
         if values["message.quote_style"] == "custom" and not all(values[k] for k in ("message.quote_open", "message.quote_close")):
             raise ValueError("自定义引号需要左右两个符号")
         if values["message.username_bracket_style"] == "custom" and not all(values[k] for k in ("message.username_bracket_open", "message.username_bracket_close")):
@@ -172,7 +191,7 @@ class Settings:
     def save(self, values=None, routing=None):
         if self.load_error:
             raise ValueError(f"原配置无效，未覆盖：{self.load_error}")
-        values = dict(self.values if values is None else values)
+        values = copy.deepcopy(self.values if values is None else values)
         self.validate(values)
         routing = copy.deepcopy(self.routing if routing is None else routing)
         self.validate_routing(routing)

@@ -8,7 +8,7 @@ from .symbols import bracket_symbols
 
 HELP = {
     "connect": "/connect — 局域网 editor、网卡选择和二维码",
-    "settings": "/settings [input|typewriting|formatting|typing|endpoints|network|history|log|osc] — 设置界面",
+    "settings": "/settings [input|typewriting|formatting|multitrack|typing|endpoints|network|history|log|osc] — 设置界面",
     "set": "/set key value — 修改并保存设置",
     "name": "/name [名字] — 设置或查看说话人",
     "quote": "/quote [on|off|en|cn|jp|custom] — 引号开关/样式",
@@ -66,7 +66,7 @@ def parse(text, script=False):
     if name in {"quit", "compose", "endpoints", "status", "connect"}:
         valid = not args
     elif name == "settings":
-        valid = len(args) <= 1 and (not args or args[0] in {"all", "input", "listen", "message", "typing", "routing", "osc", "typewriting", "formatting", "endpoints", "network", "log", "history", "lan"})
+        valid = len(args) <= 1 and (not args or args[0] in {"all", "input", "listen", "message", "typing", "routing", "osc", "typewriting", "formatting", "endpoints", "network", "log", "history", "lan", "multitrack"})
     elif name == "set":
         valid = len(args) >= 2
         if valid:

@@ -27,6 +27,7 @@ from .symbols import QUOTES, BRACKETS, bracket_symbols
 from .capabilities import Capabilities
 from .playback import DeliveryUnavailable
 from .echolive_panel import EchoLivePanel
+from .language_controls import LanguageChoice, TargetLanguages
 from .history import MessageReport
 from . import __version__
 
@@ -259,8 +260,8 @@ class SettingsScreen(HistoryPage):
     def compose(self):
         app = self.app
         if app.settings_draft is None:
-            app.settings_base = dict(app.core.settings.values)
-            app.settings_draft = dict(app.settings_base)
+            app.settings_base = copy.deepcopy(app.core.settings.values)
+            app.settings_draft = copy.deepcopy(app.settings_base)
         with Vertical(id="dialog"):
             tabs = [Tab("TUI 设置", id="tui-settings")]
             if app.core.capabilities & Capabilities.HAS_ECHO_LIVE:
@@ -268,7 +269,7 @@ class SettingsScreen(HistoryPage):
             yield PageTabs(*tabs, classes="page-tabs")
             with Vertical(id="tui-settings-content"):
                 with Horizontal(classes="filters"):
-                    groups = [("所有设置", "all"), ("通用与输入", "input"), ("模拟打字", "typewriting"), ("消息修饰", "formatting"), ("输入提示", "typing"), ("网络与托管", "network"), ("端点与路由", "endpoints"), ("历史记录", "history"), ("日志", "log"), ("OSC", "osc")]
+                    groups = [("所有设置", "all"), ("通用与输入", "input"), ("模拟打字", "typewriting"), ("消息修饰", "formatting"), ("多轨道", "multitrack"), ("输入提示", "typing"), ("网络与托管", "network"), ("端点与路由", "endpoints"), ("历史记录", "history"), ("日志", "log"), ("OSC", "osc")]
                     yield Select(groups, value={"listen": "network"}.get(self.group, self.group), allow_blank=False, id="category")
                     yield Input(placeholder="搜索名称或设置键", id="search")
                 with VerticalScroll(id="fields"):
@@ -277,11 +278,15 @@ class SettingsScreen(HistoryPage):
                             continue
                         value = app.settings_draft[key]
                         wid = "field-" + key.replace(".", "-")
-                        with Horizontal(classes="setting-row", id="row-" + wid):
+                        with Horizontal(classes="setting-row" + (" language-setting" if key in {"multitrack.source_language", "multitrack.target_languages"} else ""), id="row-" + wid):
                             label = Label("引号（左 / 右）" if key == "message.quote_open" else "姓名括号（左 / 右）" if key == "message.username_bracket_open" else field.label)
                             label.tooltip = f"{key}\n默认：{field.default}\n{field.effect(key)}"
                             yield label
-                            if key in {"message.quote_open", "message.username_bracket_open"}:
+                            if key == "multitrack.source_language":
+                                yield LanguageChoice(value, id=wid, name=key)
+                            elif key == "multitrack.target_languages":
+                                yield TargetLanguages(value, id=wid, name=key)
+                            elif key in {"message.quote_open", "message.username_bracket_open"}:
                                 close_key = key.replace("_open", "_close")
                                 with Horizontal(classes="quote-pair"):
                                     yield Input(str(value), id=wid, name=key, placeholder="左引号")
@@ -342,7 +347,7 @@ class SettingsScreen(HistoryPage):
         network = self.app.core.server
         host = self.app.core.settings['listen.public_host'] or self.app.core.settings['listen.host']
         hint = f"http://{host}:{self.app.core.settings['listen.port']}/live.html · 配置覆盖仅作用 HTTP 响应；浏览器刷新生效" if network.hosting.root else "当前目录未识别 Echo Live；仅提供 WS 服务。"
-        self.query_one("#setting-info", Static).update(hint if group == "network" else "悬停字段查看默认值及生效方式；重置仅修改当前分类草稿。")
+        self.query_one("#setting-info", Static).update(hint if group == "network" else "启用后正文发送至 Microsoft 翻译；LAN 翻译失败仍转发原消息。" if group == "multitrack" else "悬停字段查看默认值及生效方式；重置仅修改当前分类草稿。")
 
     @staticmethod
     def belongs(key, group):
@@ -362,6 +367,8 @@ class SettingsScreen(HistoryPage):
     @on(Input.Changed)
     @on(Checkbox.Changed)
     @on(Select.Changed)
+    @on(LanguageChoice.Changed)
+    @on(TargetLanguages.Changed)
     def changed(self, event):
         event.stop()
         widget = event.control
@@ -414,25 +421,25 @@ class SettingsScreen(HistoryPage):
                 panel.query_one("#targets", Input).value = "" if action == "reset" else " ".join(self.app.core.settings.routing["targets"])
                 panel.query_one("#exclude", Input).value = "" if action == "reset" else " ".join(self.app.core.settings.routing["exclude"])
                 return
-            values = dict(self.app.settings_draft)
+            values = copy.deepcopy(self.app.settings_draft)
             if action == "reset":
                 group = self.query_one("#category", Select).value
-                values.update({k: f.default for k, f in FIELDS.items() if self.belongs(k, group)})
+                values.update({k: copy.deepcopy(f.default) for k, f in FIELDS.items() if self.belongs(k, group)})
             elif action == "reload":
                 loaded = Settings(self.app.core.settings.path)
                 if loaded.load_error:
                     self.query_one("#settings-error", Static).update(loaded.load_error)
                     return
-                values = dict(loaded.values)
+                values = copy.deepcopy(loaded.values)
                 self.app.core.settings.load_error = ""
             else:
-                values = dict(self.app.core.settings.values)
+                values = copy.deepcopy(self.app.core.settings.values)
             self.app.settings_draft = values
             if action == "discard":
-                self.app.settings_base = dict(values)
+                self.app.settings_base = copy.deepcopy(values)
             for key, value in values.items():
                 widget = self.query_one("#field-" + key.replace(".", "-"))
-                with widget.prevent(Input.Changed, Select.Changed):
+                with widget.prevent(Input.Changed, Select.Changed, LanguageChoice.Changed, TargetLanguages.Changed):
                     widget.value = str(value) if isinstance(widget, Input) else value
             self.sync_pairs()
         else:
@@ -891,9 +898,20 @@ class EchoApp(App, inherit_bindings=False):
     .setting-row Label { width: 38%; height: 3; content-align: left middle; padding-right: 1; }
     .setting-row Input, .setting-row Select { width: 1fr; }
     .setting-row Checkbox { width: 1fr; border: none; }
+    .language-setting { height: auto; min-height: 4; }
+    LanguageChoice { height: 2; width: 1fr; }
+    TargetLanguages { height: auto; width: 1fr; }
+    .language-search { height: 1; min-height: 1; border: none; padding: 0; }
+    .language-choice { height: 1; }
+    .target-rows { height: auto; }
+    .target-row { height: 1; }
+    .target-row Static { width: 1fr; height: 1; }
+    .target-row Button { width: auto; }
+    .target-add { margin: 0; }
     SettingsScreen.narrow .filters Select { width: 16; }
     SettingsScreen.narrow #setting-info { display: none; }
     SettingsScreen.narrow .setting-row { layout: vertical; height: 5; }
+    SettingsScreen.narrow .language-setting { height: auto; }
     SettingsScreen.narrow .setting-row Label { width: 100%; height: 1; }
     SettingsScreen.narrow .setting-row Input, SettingsScreen.narrow .setting-row Select { width: 100%; }
     SettingsScreen.narrow .quote-pair { width: 100%; }
