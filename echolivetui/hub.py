@@ -10,7 +10,7 @@ from .history import HistoryDelivery, MessageReport, entries_from_data
 from .message import typewrite_incoming
 from .osc import OscDelivery
 from .playback import PrintingReceipt
-from .translation import TranslationService
+from .translation import TranslationService, TranslationError, paragraph_text
 
 
 @dataclass
@@ -27,6 +27,8 @@ class Peer:
     playbacks: dict[int, PrintingReceipt] = field(default_factory=dict)
     ready_at: float = 0.0
     current_playback: PrintingReceipt | None = None
+    incoming: asyncio.Queue = field(default_factory=lambda: asyncio.Queue(256))
+    incoming_worker: asyncio.Task | None = None
 
     def enqueue(self, envelope, delay=0, fast=False, playback=None):
         if self.closed:
@@ -93,9 +95,12 @@ class Peer:
         self.closing = True
         self.closed = True
         self.fail_playbacks()
-        if self.worker:
-            self.worker.cancel()
-            await asyncio.gather(self.worker, return_exceptions=True)
+        tasks = [task for task in (self.worker, self.incoming_worker) if task and task is not asyncio.current_task()]
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        while not self.incoming.empty():
+            self.incoming.get_nowait()
         await self.ws.close()
 
 
@@ -196,6 +201,61 @@ class Hub:
             return peer
         if envelope.get("target") == "@__ws_server":
             return peer
+        if action == "message_data" and (peer.incoming_worker or (self.settings["multitrack.enable"] and peer.profile.role == "server")):
+            try:
+                peer.incoming.put_nowait((copy.deepcopy(envelope), remote, copy.deepcopy(self.settings.group("multitrack"))))
+            except asyncio.QueueFull:
+                self.log(f"入站翻译队列已满：{peer.profile.name}，消息未接受", "error")
+                raise ValueError("入站翻译队列已满，消息未接受") from None
+            if peer.incoming_worker is None or peer.incoming_worker.done():
+                peer.incoming_worker = asyncio.create_task(self.process_incoming(peer))
+            return peer
+        return await self.dispatch(peer, envelope, remote=remote)
+
+    async def process_incoming(self, peer):
+        while not peer.closed:
+            envelope, remote, config = await peer.incoming.get()
+            try:
+                if config["enable"]:
+                    try:
+                        envelope = await self.translate_envelope(envelope, config)
+                    except TranslationError as exc:
+                        self.report(f"翻译失败，已转发原消息（{peer.profile.name}）：{exc}")
+                if not peer.closed:
+                    await self.dispatch(peer, envelope, remote=remote)
+            except (ValueError, TypeError, KeyError) as exc:
+                self.log(f"入站消息处理失败：{peer.profile.name}：{exc}", "warn")
+
+    async def translate_envelope(self, envelope, config):
+        messages = envelope.get("data", {}).get("messages", [])
+        if not isinstance(messages, list):
+            return envelope
+        indexes, texts = [], []
+        for index, paragraph in enumerate(messages):
+            if isinstance(paragraph, dict) and paragraph.get("track"):
+                continue
+            text = paragraph_text(paragraph.get("message", "") if isinstance(paragraph, dict) else paragraph)
+            if text.strip():
+                indexes.append(index)
+                texts.append(text)
+        if not texts:
+            return envelope
+        result = await self.translator.translate(texts, config["source_language"], config["target_languages"])
+        translated = copy.deepcopy(envelope)
+        for result_index, index in enumerate(indexes):
+            paragraph = translated["data"]["messages"][index]
+            if not isinstance(paragraph, dict):
+                paragraph = translated["data"]["messages"][index] = {"message": paragraph}
+            tracks = result.tracks(result_index)
+            data = paragraph.get("data", {})
+            speed = data.get("printSpeed", self.settings["message.print_speed"]) if isinstance(data, dict) else self.settings["message.print_speed"]
+            for track in tracks:
+                track["data"] = {"printSpeed": speed}
+            paragraph["track"] = tracks
+        return translated
+
+    async def dispatch(self, peer, envelope, *, remote=False):
+        action = envelope["action"]
         if action == "message_data":
             # OSC takes the submitted plain text before the LAN simulated-typing
             # rewrite, which splits plain strings into per-token pinyin segments.
