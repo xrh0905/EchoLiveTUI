@@ -2,7 +2,7 @@
 
 面向 Echo Live 的 Python / Textual 终端编辑器，支持文字广播、格式预览、多轨道自动翻译、逐行演出、局域网 editor 和 VRChat OSC。
 
-当前版本 **0.6.1**，需要 Python 3.12+。Windows 用户可从 [Releases](https://github.com/xrh0905/EchoLiveTUI/releases) 下载单文件 EXE。
+当前版本 **0.6.2**，需要 Python 3.12+。Windows 用户可从 [Releases](https://github.com/xrh0905/EchoLiveTUI/releases) 下载单文件 EXE。
 
 ## 启动
 
@@ -120,13 +120,9 @@ LAN 入站默认启用模拟打字，使用与本机相同的拼音／注音方�
 | `/status`、`/help` | 状态和完整命令帮助 |
 | `/quit`、`/exit` | 退出 |
 
-`--import-legacy 旧config.yaml` 可显式导入旧配置，不修改原文件、不导入 `skip_mode`。兼容入口以 `/help` 为准，不兼容整套旧命令。
-
 ## 兼容范围
 
 上标、下标及字幕子轨需要 Echo-Live 1.9.0；基础广播兼容已验证的 1.8.12、1.6.6。托管服务覆盖 HTTP 返回的 `config.js`，并修正 1.8.12 的脚本加载顺序与弹窗焦点；原版 `settings.html` 仍读取原配置。
-
-Echo-Live 1.9.0 的分段变速回调需在本地 `res/class/Echo.js` 中将 `setInterval(this.print, this.printSpeedChange, this)` 修复为 `setInterval(() => this.print(), this.printSpeedChange)`。TUI 不复写该脚本；升级至包含修复的上游版本后直接使用新版文件。
 
 当前不提供播放跳过／清队列的 `/skip`、Companion、所见即所得编辑、上游自动下载升级切换或外部 WS 服务端连接模式。OBS、Windows 中文输入法、终端剪贴板和 OBS 全局热键仍需在实际使用环境验证。
 
