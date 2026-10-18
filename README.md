@@ -1,8 +1,8 @@
 # EchoLiveTUI
 
-面向 Echo Live 的 Python / Textual 终端编辑器，优先满足直播时的文字输入、广播和端点控制。
+面向 Echo Live 的 Python / Textual 终端编辑器，支持文字广播、格式预览、多轨道自动翻译、逐行演出、局域网 editor 和 VRChat OSC。
 
-当前版本 0.6.0：Python 3.12+、Textual、aiohttp。主屏持续聚焦输入框，历史区域支持鼠标框选复制；设置、端点、连接和演出页替换历史区域，保留顶栏、工作区和底栏。承载模式提供 Echo-Live 字体与版本管理，演出页逐行发送等待实际打印完成，并支持暂停与连接恢复。
+当前版本 **0.6.1**，需要 Python 3.12+。Windows 用户可从 [Releases](https://github.com/xrh0905/EchoLiveTUI/releases) 下载单文件 EXE。
 
 ## 启动
 
@@ -12,117 +12,52 @@ python -m venv .venv
 .\.venv\Scripts\python -m echolivetui
 ```
 
-也可以运行安装后的 `echolivetui` 命令。默认监听 `127.0.0.1:3000`，WS 接口为 `/ws`（兼容根路径 WS）。配置位于启动工作目录的 `echolivetui.yaml`，或使用 `--config 文件路径`。通过 `--import-legacy 旧config.yaml` 显式导入旧设置，不修改原文件，不导入 `skip_mode`。
+安装后也可使用 `echolivetui` 命令。默认监听 `127.0.0.1:3000`，WebSocket 接口为 `/ws`，兼容根路径 WS。配置保存在启动工作目录的 `echolivetui.yaml`，可用 `--config 文件路径` 指定其他文件；`--headless` 仅运行服务。
 
-在 Echo Live 目录中运行会自动托管当前目录，OBS 使用 `http://127.0.0.1:3000/live.html`，历史页使用 `/history.html`。覆盖 HTTP 返回的 `config.js`，并对 1.8.12 的脚本加载顺序和弹窗焦点错误做响应层修正，磁盘文件不变；网页 `settings.html` 获得原配置。其他目录只启动 WS 服务，此外只检测当前目录下的 `EchoLive` 子目录，不递归扫描；当前目录优先。
+在 Echo Live 目录或含 `EchoLive` 子目录的工作目录启动时，会自动托管网页：OBS 使用 `http://127.0.0.1:3000/live.html`，历史页使用 `/history.html`。仅检查当前目录和单级 `EchoLive` 子目录，当前目录优先；没有上游资源时提供独立 WS 服务。启动后，历史区显示实际监听地址及端口对应的网页入口。
 
-托管启动成功时，主屏历史区会出现来自 EchoLiveTUI 的入口消息，链接带实际端口及 `/live.html?name=main`。仅显示监听范围内的本机地址和首个有效 IPv4 地址，不显示不可用候选；启用配对后另行显示 editor 远程入口。
+独立 WS 用法需在上游页面开启 WS、配置地址，并设置 `editor.websocket.disable_broadcast=true`，使消息经 TUI 路由。Echo Live 资源和个人配置不包含在发行包中。
 
-## 常用操作
+## 功能
 
-- 输入文字并按 Enter；`//settings` 发送字面量 `/settings`。
-- `/settings` 打开设置；`/settings log` 调整日志；`/settings history` 调整 EchoLiveTUI 历史策略。
-- `/name 名字`、`/quote [on|off|en|cn|jp|custom]`、`/paren once|on|off`。
-- `/endpoints` 查看客户端档案及能力覆盖；`/target set UUID或@名称`、`/target exclude ...`、`/target all`。
-- `/compose` 打开演出页；默认整段发送多行消息，也可开启逐行发送并指定行间隔。多行粘贴也会打开此页，不执行粘贴的命令。
-- `/history clear` 清空历史端；`/help` 查看完整命令；`/quit` 退出。
+### 文字编辑与格式预览
 
-默认发送给所有在线字幕端，包括仅接收定向广播的字幕端。历史端独立从已接受消息生成记录，不依赖字幕端打印回报；只有历史端在线也可发送。托管配置关闭上游“隐藏最新一条”，默认立即显示历史；可选择由 EchoLiveTUI 暂存最新一条，直到下一条消息到达。非托管页面需手动关闭 `history.message.latest_message_hide` 和 `live_display_hidden_latest_message_show`。
+主屏保持输入焦点，Enter 发送文字；`//settings` 发送字面量 `/settings`。鼠标拖选或 Shift+方向键选择文字，Ctrl+C 复制选区。无选区时 Ctrl+C 默认不退出，可通过 `/nocc` 或设置调整。
 
-server/editor 发来的消息也记录在 TUI 和独立 history 端；客户端 heartbeat 会转发给所有 server 端。
+格式栏支持粗体、斜体、下划线、删除线、上下标、字号、颜色和重置，也可直接输入 Markdown 与短码：
 
-默认日志级别 `info`，显示端点连接与断开；发送成功只记 DEBUG，写入失败记 WARN；主屏保留用户消息记录。`debug` 显示接受、写入成功和无效协议消息。框选历史后可用 Ctrl+C 复制，未选中文字时 Ctrl+C 默认不退出。窗口标题栏、状态栏和历史区均不夺取输入焦点。
+| 短码 | 效果 |
+| --- | --- |
+| `@b`、`@i`、`@u`、`@s` | 粗体、斜体、下划线、删除线 |
+| `@^`、`@_` | 上标、下标，例如 `x@^2@r + H@_2@rO` |
+| `@+`、`@-` | 在五档字号间调整 |
+| `@[#66ccff]` | 颜色，支持 3/4/6/8 位十六进制值 |
+| `@r` | 清除累积格式 |
+| `@shout`、`@rainbow` | 喊叫事件、彩虹样式 |
+| `@<rainbow>`、`@<:custom>` | 内置、自定义 CSS 类 |
+| `@@`、`\@` | 输出字面量 `@` |
 
-独立 WS 使用时，页面应只经 WS 发送：启用 WS，设置对应地址，并设置 `editor.websocket.disable_broadcast=true`。混合使用独立 BroadcastChannel 仍可能绕过 EchoLiveTUI 的去重边界。未知版本字幕端默认视为支持输入状态；已知旧版本或手动禁用仍会排除。输入状态默认启用，可在设置中关闭。
+预览按需扩展为一至三行，上下标文字用灰色区分，发送仍保留实际颜色。格式会累积，同时启用上下标时按上游 CSS 显示为上标，切换前请先重置。字号、动画、CSS 类和透明度的实际效果以 Echo Live 网页为准。
 
-- [第一版设计](docs/v1-design.md)：范围、界面、广播路由、端点设置、按当前目录托管、配置响应覆盖、实施与验收。
-- [1.6.6 → 1.8.12 差异和适配缺口](docs/upstream-compatibility.md)：源码结论、旧客户端缺陷、优先级和证据。
-- [固定参考版本](docs/reference-lock.json)：便于复现的仓库和提交号。
+主输入的上下键切换输入历史；Tab 进入补全选择后，上下键切换候选，Enter 确认，Esc 关闭。演出编辑器使用 Ctrl+Space 补全短码。`/settings input` 可调整格式栏、补全和格式预览。表情码及图片码保留为普通文本。
 
-## 复现调查
+### 消息修饰与模拟打字
 
-需要 Git、Python 3.12+；行为探针另外需要 Node.js，Node 不是产品运行依赖。
+正文引号由 `/quote` 控制，姓名括号由 `/paren` 控制，均支持预设和自定义符号；`/paren once` 仅作用于下一次成功发送。新配置默认使用「」引号和 20ms 打印间隔，已有配置保留显式值。
 
-```powershell
-git clone https://github.com/sheep-realms/Echo-Live.git .reference/Echo-Live
-python scripts/audit-upstream.py
-node scripts/probe-upstream.cjs
-```
+支持后缀、拼音／注音模拟打字和按打印步数设置的自动停顿。连续标点、长破折号、省略号、数学符号和 emoji 保留为完整符号片段，中文按词模拟输入；保留样式、速度、停顿和上游已有打字数据。底栏显示修饰状态，模拟打字或停顿关闭时显示 `○`，开启时显示毫秒数。
 
-已有 `.reference/Echo-Live` 时跳过克隆。审计按固定标签读取 Git 对象，不改变参考仓库工作区。
+### 多轨道自动翻译
 
-输出位于 `.reference/audit/comparison.json` 和 `.reference/audit/upstream.patch`；该目录不提交、不打包。
+在 `/settings multitrack` 开启自动翻译并添加至少一种子轨语言。主轨留空时使用 Microsoft 自动检测，识别结果以淡色 Hint 显示在正文预览行末。语言列表可搜索名称、原生名称和代码，置顶 `zh-Hans`、`en`、`ja`、`ru`；子轨支持添加、删除和排序，禁止重复，日语代码为 `ja`。
 
-行为探针直接调用两个上游版本的协议方法，使用内存浏览器与时钟替身。它验证协议假设，不代表通过了浏览器、OBS 或 TUI 端到端验收。
+输入停键 500ms 后，输入框下方逐语言显示译文或错误。译文区可换行、滚动，最多占视口三分之一且不超过八行，独立于格式预览开关。新输入使旧译文立即失效，缓存命中时直接显示。自动翻译子轨默认使用 `small` 字号，并沿用主轨的引号开关和样式（含自定义引号）；引号变更直接更新预览，不重新请求翻译。
 
-## 验证
+Enter 立即结束去抖，等待当前译文后一起发送主轨及子轨；等待期间编辑只读，Esc 可取消并保留草稿。失败默认不广播、不写历史、不发送 OSC；开启“翻译失败仍发送（仅本机）”后，失败时只发送原主轨并提示。演出页可按整段或游标所在行预览、翻译。
 
-```powershell
-.\.venv\Scripts\python -m pytest -q
-node scripts/probe-upstream.cjs
-```
+原版 editor（含 LAN）的消息到达 TUI 后才翻译：已有非空子轨或没有正文的段落保持原样，其余正文批量翻译。每连接按接收顺序处理，心跳和控制消息独立响应；任一必需译文失败时，整条原消息照常转发，不受本机错误开关影响。历史与 OSC 始终只取主轨一次。
 
-可选浏览器测试需要 `pip install playwright` 和 Windows 上已安装的 Edge：
-
-```powershell
-.\.venv\Scripts\python scripts/browser-smoke.py .reference/Echo-Live
-.\.venv\Scripts\python scripts/capture-ui.py
-```
-
-已验证上游 1.6.6、1.8.12 的真实浏览器双字幕/单历史链路、资源载入和配置文件哈希不变。OBS、Windows 中文输入法、终端剪贴板与 OBS 全局热键仍需实际使用环境验证。
-
-## 第一版边界
-
-保留 Python、aiohttp、旧消息语法、拼音/注音模拟打字、自动停顿与 VRChat OSC；使用 Textual 重建输入优先的界面。
-
-本程序作为本地 WS 服务端。在启动工作目录或其 `EchoLive` 子目录具有 Echo Live 结构时，额外托管该目录并覆盖 HTTP 配置响应。未识别到资源时保持独立 WS 用法。
-
-第一版不做 Companion、所见即所得、Echo Live 下载/升级/版本切换，以及外部 WS 服务端连接模式。
-
-第一版即实现每客户端的身份、页面职责、版本/能力和连接来源识别，通过适配层分别处理 live、history、character、editor 和未知客户端，为后续功能提供基础。
-
-命令采用新规范：`//` 发送以 `/` 开头的文字，`/settings` 打开可搜索、分组、校验并保存各项功能的 TUI 设置页；`/set` 提供统一快捷修改。`/name` 保留为正式命令，仅保留 `/nocc`、`/clear`、`/exit` 等明确列出的兼容入口，不兼容整套旧命令。
-
-`/paren once|on|off` 控制姓名括号，不修改消息正文；正文引号由 `/quote` 控制。姓名括号和正文引号均支持预设与自定义，预设下左右输入框禁用并显示所选符号，自定义下可分别编辑。底栏依次为「连接、端点、多行、设置、退出」，均可点击；在设置页切换端点分类不会另开窗口。单行顶栏不参与历史文本框选。
-
-## 阶段 1.5
-
-已实现局域网发送模式：托管原版 Echo Live editor，识别本机局域网 IP 并提供选择、二维码/URL，用户打开链接即可访问 editor。复用第一版 WS 握手、客户端识别与广播路由，不另设签到协议。具体范围见[设计中的阶段 1.5](docs/v1-design.md#9-阶段-15局域网发送模式)。
-
-## 阶段二
-
-重新设计 `/skip` 与播放/取消控制，明确区分下一条、结束打印、清队列和隐藏显示。第一版不提供旧 `/skip` 或 `skip_mode` 设置；具体行为在阶段二定案。
-
-
-### 配对操作
-
-在 Echo Live 目录启动，点击「连接」或执行 `/connect`。选择网卡或输入本机 IPv4，启用后左侧显示二维码，右侧显示真实监听的 editor URL 和接口控制。手机与电脑网络互通时，扫码即可使用原版 editor 发送。关闭连接会停止局域网入口并断开该入口的远程连接，本机 OBS 连接保留。设置会保存，下一次启动恢复。未启用时不会开放远程入口；远程页面不能访问 settings.html。
-
-LAN 入站消息默认启用模拟打字，可在「模拟打字」或「网络与托管」设置中切换，也可执行 `/set lan.typewriting off` 关闭。此开关独立于本机消息的模拟打字开关，使用同一拼音／注音方案；下一条远程消息生效，保留编辑器的说话人、样式、速度和已有打字数据，不额外添加引号或后缀。
-
-模拟打字时，连续的标点、长破折号、省略号、线条和数学符号，以及包含连接符或变体标记的 emoji 保留为完整符号片段，直接打印；中文仍按词模拟拼音／注音输入。保留样式与停顿边界，不合并编辑器已分开的格式片段。演出页匹配打印回报时忽略上游过滤器插入的零宽分隔符，仍等待打印完成事件。
-
-开启 VRChat OSC 后，TUI 提交与 editor 页面入站的消息（含局域网 editor）各向 `osc.host:osc.port` 发送一次 `/chatbox/input`，内容取提交的纯文本，不含短码与模拟打字的拼音分段；同一次广播内的多条消息用换行连接为一条。OSC 失败只记录错误，不影响字幕广播与独立历史，也不因多个 live 端或 WS 回传重复发送。「输入提示」开启时同步发送 `/chatbox/typing`：开始输入为开，持续编辑续期，3 秒无输入、清空、提交或关闭输入提示为关。
-
-保存与网络监听无关的设置时，不重新校验 LAN 网卡或重建监听；已保存的局域网 IP 失效也不会阻止修改用户名、OSC、预览或版本仓库。连接页点击启用会重新校验地址并尝试连接；切换网卡或监听端口仍须使用有效地址。
-
-### Echo-Live 1.9.0
-
-支持 `@^` 上标和 `@_` 下标，以 `@r` 重置，例如 `x@^2@r + H@_2@rO`。两个输入入口提供对应的补全和格式按钮；预览按需扩展为一至三行，上下标文字显示灰色以区分正文，实际发送仍保留指定的颜色。格式会累积，同时启用上下标时按上游 CSS 显示为上标，切换时请先重置。
-
-多轨道内部 `prepare(..., tracks=[...])` 和 `Core.submit(..., tracks=[...])` 接口接受一层上游段落对象；异步 `Core.send(...)` 根据设置生成翻译子轨，显式提供非空子轨时保留原轨道。模拟打字覆盖主轨与子轨；演出等待所有轨道打印完成，历史和 OSC 仅记录主轨。子轨文字按上游格式传入，不额外应用短码解析、引号、后缀或自动停顿；事件及自定义数据的可用范围遵循上游约定。
-
-Echo-Live 1.9.0 的分段变速回调需在本地 `res/class/Echo.js` 中将 `setInterval(this.print, this.printSpeedChange, this)` 修复为 `setInterval(() => this.print(), this.printSpeedChange)`。TUI 不复写该脚本响应；升级至已包含此修复的上游版本后直接使用新版文件。Echo-Live 资源不随 TUI 打包。
-
-### 多轨道自动翻译（0.6.0）
-
-在 `/settings multitrack` 开启“多轨道自动翻译”，选择主轨语言并添加有序子轨语言。主轨留空使用 Microsoft 的自动检测，检测结果显示在预览中；语言列表可搜索名称、原生名称和代码，置顶 `zh-Hans`、`en`、`ja`、`ru`，可删除或上下调整子轨。语言资源随程序提供，选择语言无需联网；启用翻译后正文会发送至 Microsoft Edge 翻译接口。功能默认关闭，启用前至少添加一种目标语言。
-
-本机输入停键 500ms 后在输入框下方显示译文；新输入立即使旧译文失效。译文区支持滚动，最多占视口三分之一且不超过八行，不受格式预览开关影响。Enter 立即结束去抖并等待最新译文，等待时编辑只读，Esc 取消并保留草稿。翻译失败默认不广播、写历史或发送 OSC；再次发送可重试。开启“翻译失败仍发送（仅本机）”后，失败时发送原消息并提示，不附加旧译文。演出页整段模式预览全文，逐行模式预览并翻译游标所在行；下一行仍等待所有字幕轨道打印完成。
-
-原版 editor（含 LAN）的消息到达 TUI 后自动翻译；已有非空子轨的段落不再翻译。没有正文的媒体段落保持原样，其余段落按语言顺序生成子轨。远程输入尚未发送时不请求翻译。LAN 翻译失败始终转发整条原消息并提示，不受本机错误开关影响；每连接保持消息顺序，心跳和控制消息不等待翻译。历史与 OSC 仍仅记录主轨一次。
-
-示例配置（语言代码必须来自供应商列表，日语为 `ja`）：
+功能默认关闭。语言表随程序打包；启用后正文纯文本会发送至 Microsoft Edge 翻译接口，不发送用户名、格式短码或模拟打字拼音。请求超时为 8 秒，错误明确显示，不无限重试；最近 128 组成功结果仅缓存在进程内，预览与发送共享请求及结果。
 
 ```yaml
 multitrack:
@@ -132,9 +67,91 @@ multitrack:
   skip_errors: false
 ```
 
-翻译请求超时为 8 秒，限流、服务错误或译文缺失会显示错误；不会无限重试。最近 128 组成功结果仅缓存在进程内，预览与发送共用请求和结果。开发可执行 `python scripts/browser-smoke.py EchoLive --translate` 验证真实 Edge 翻译、本机子轨及 LAN 转发；CI 使用可控服务替身，自检不依赖外网。
+### 多行输入与演出
 
-### Windows 打包与发布
+`/compose`、Shift+Enter 或多行粘贴打开演出页；粘贴内容作为文字处理，不执行其中的命令。整段模式一次发送全文，逐行模式从游标所在行开始并跳过空行。
+
+逐行发送等待所有目标字幕轨道实际打印完成后，再计算行间隔、发送下一句。发送时锁定编辑并高亮当前行，可暂停后修改内容或游标，从新位置继续。Esc 或“取消/返回”停止后续发送并保留草稿；最后一句完成后清空演出草稿并返回主页。
+
+目标断开或未反馈完成时暂停。连接恢复后清除断开提示，保持暂停，手动继续时从游标所在行重发；没有输出端时保留草稿。
+
+### 端点、路由与历史
+
+`/endpoints` 查看客户端身份、页面职责、软件版本、连接来源和能力覆盖。默认发送给所有在线字幕端，可用 `/target` 定向选择或排除 UUID、`@名称`。未知版本字幕端默认支持输入状态，已知旧版或手动禁用的端点会排除。
+
+历史端独立接收已接受消息，不依赖字幕端打印回报；只有历史端在线也可发送。默认立即显示历史，可在 `/settings history` 暂存最新一条至下次发送。非托管页面需手动关闭上游 `history.message.latest_message_hide` 和 `live_display_hidden_latest_message_show`。
+
+TUI 历史按时间、姓名、内容显示，支持鼠标框选复制，默认保留 500 条完整记录，超限按 FIFO 淘汰。editor 入站也记录主轨。默认 `info` 日志显示连接与断开，`debug` 增加接受和写入记录；发送失败显示错误，用户消息单独保留。
+
+### 局域网 editor
+
+检测到 Echo Live 后，点击底栏“连接”或执行 `/connect`，选择本机网卡／IPv4 并启用。页面提供二维码及实际 editor URL，手机与电脑网络互通时即可使用原版 editor 发送。关闭入口会断开远程连接，保留本机 OBS 连接；配置在下次启动恢复，远程页面不能访问 `settings.html`。
+
+LAN 入站默认启用模拟打字，使用与本机相同的拼音／注音方案，可用 `/set lan.typewriting off` 独立关闭。保留主轨、说话人、样式、速度和已有打字数据，不额外给原主轨添加引号或后缀。
+
+保存用户名、OSC、预览等无关设置不会校验 LAN 网卡或重建监听，失效的旧 IP 不阻止保存。启用／重试入口、切换网卡或修改监听端口时继续校验地址。
+
+### VRChat OSC
+
+`/settings osc` 配置目标。TUI 与 editor 入站的每条已接受消息向 `osc.host:osc.port` 发送一次 `/chatbox/input`，取主轨纯文本，不含短码或打字拼音；同一广播内的多段正文合并为换行文本。OSC 错误不影响字幕和独立历史，也不会因多个字幕端或回报重复发送。
+
+输入提示开启时同步发送 `/chatbox/typing`：编辑时续期，3 秒无输入、清空、提交或关闭提示时停止。
+
+### 设置与 Echo-Live 管理
+
+`/settings` 提供分组、搜索、校验、草稿重置、冲突检查及原子保存；`/set key value` 可快捷修改。通用设置、模拟打字、消息修饰、多轨道、网络、端点、历史、日志和 OSC 使用同一配置。设置、端点、连接和演出页替换历史区域，保留顶栏、输入工作区和底栏入口。
+
+承载模式额外提供 Echo-Live 字体和版本管理。字体设置修改 `res/style/live-common/font-family.css` 的字体变量，支持逗号分隔列表及恢复默认；刷新字幕页后生效。版本管理可配置发布仓库（默认 `sheep-realms/Echo-Live`），检查最新正式版、比较版本并打开发布页，不自动安装或替换上游资源。
+
+## 常用命令
+
+| 命令 | 用途 |
+| --- | --- |
+| `/settings [分类]` | 设置，如 `multitrack`、`history`、`log`、`osc` |
+| `/set key value` | 修改并保存单项设置 |
+| `/name 名字` | 设置说话人 |
+| `/quote [on\|off\|en\|cn\|jp\|custom]` | 正文引号开关／样式 |
+| `/paren once\|on\|off` | 姓名括号 |
+| `/connect`、`/endpoints` | LAN 入口、客户端与路由设置 |
+| `/target set UUID或@名称`、`/target exclude ...`、`/target all` | 选择、排除或恢复全部字幕端 |
+| `/compose` | 多行输入与逐行演出 |
+| `/history clear` | 清空独立历史 |
+| `/source 文件` | 预检查后执行命令脚本 |
+| `/status`、`/help` | 状态和完整命令帮助 |
+| `/quit`、`/exit` | 退出 |
+
+`--import-legacy 旧config.yaml` 可显式导入旧配置，不修改原文件、不导入 `skip_mode`。兼容入口以 `/help` 为准，不兼容整套旧命令。
+
+## 兼容范围
+
+上标、下标及字幕子轨需要 Echo-Live 1.9.0；基础广播兼容已验证的 1.8.12、1.6.6。托管服务覆盖 HTTP 返回的 `config.js`，并修正 1.8.12 的脚本加载顺序与弹窗焦点；原版 `settings.html` 仍读取原配置。
+
+Echo-Live 1.9.0 的分段变速回调需在本地 `res/class/Echo.js` 中将 `setInterval(this.print, this.printSpeedChange, this)` 修复为 `setInterval(() => this.print(), this.printSpeedChange)`。TUI 不复写该脚本；升级至包含修复的上游版本后直接使用新版文件。
+
+当前不提供播放跳过／清队列的 `/skip`、Companion、所见即所得编辑、上游自动下载升级切换或外部 WS 服务端连接模式。OBS、Windows 中文输入法、终端剪贴板和 OBS 全局热键仍需在实际使用环境验证。
+
+## 开发与验证
+
+```powershell
+.\.venv\Scripts\python -m pytest -q
+.\.venv\Scripts\python -m echolivetui --self-test
+```
+
+pytest 和自检使用本地可控翻译替身，不请求外部翻译 API，不以供应商可用性决定测试结果。
+
+可选浏览器验证需要 Playwright 和 Windows Edge：
+
+```powershell
+python -m pip install playwright
+python scripts/browser-smoke.py EchoLive
+python scripts/capture-ui.py
+```
+
+真实 Edge 翻译仅按需手工验证：`python scripts/browser-smoke.py EchoLive --translate`。上游资源可用 `scripts/download-echolive.py` 下载至参考目录，不覆盖当前 Echo Live。
+
+内部接口 `prepare(..., tracks=[...])`、`Core.submit(..., tracks=[...])` 接受一层上游子轨段落并深拷贝，保留手工样式、速度、停顿和 `typewrite`，拒绝嵌套。异步 `Core.send(...)` 生成自动翻译子轨，已有显式非空子轨时跳过翻译。子轨文字按字面传入，不再次解析短码，不追加后缀或自动停顿；耗时估算和完成等待覆盖全部轨道，历史及 OSC 只使用主轨。
+
+## Windows 打包与发布
 
 ```powershell
 python -m pip install -e ".[build,test]"
@@ -142,35 +159,24 @@ python scripts/build.py --mode standalone
 python scripts/build.py --mode onefile
 ```
 
-需要 Python 3.12 x64 和 Visual Studio C++ 工具链。产物位于 `dist`；onefile 直接提供 EXE 与 SHA256，不额外套 ZIP 或目录；可选本地 standalone 提供平铺 ZIP；打包后自动运行 `--self-test` 验证 TUI、词典、二维码、HTTP 和 WS，并在独立隐藏控制台验证真实 Ctrl+C 的拦截和退出。解压后将整个 standalone 文件夹放在任意位置，从 Echo Live 工作目录运行其中的 EXE；onefile 可直接放入 Echo Live 目录运行。两者均按启动工作目录识别资源。
+需要 Python 3.12 x64 和 Visual Studio C++ 工具链。`dist` 中的 onefile 直接提供 EXE 与 SHA256；standalone 提供平铺 ZIP，解压后保留整个文件夹。从 Echo Live 工作目录运行程序即可识别资源。
 
-单文件使用 `--onefile-child-grace-time=infinity`，避免 Nuitka 父进程在 Ctrl+C 后强行结束启用了拦截的子进程。`/nocc` 动态控制 Ctrl+C，SIGTERM 仍请求退出。底栏「退出」可正常结束。
+打包后自动运行 `--self-test` 验证 TUI、词典、二维码、HTTP、WS 和翻译流程，并在独立隐藏控制台验证真实 Ctrl+C 的拦截与退出。onefile 使用 `--onefile-child-grace-time=infinity`，避免父进程强行结束启用了退出保护的子进程；`/nocc` 动态控制保护，SIGTERM 请求退出。
 
-GitHub Actions 在提交和 PR 上运行测试；手动运行打包工作流只产生 Windows onefile EXE 和 SHA256，推送 `v*` 标签时，全部测试与打包自检通过后发布 GitHub Release；带 `-alpha` / `-beta` 或 `aN` / `bN` / `rcN` 后缀的标签发布为 Pre-Release。版本标签应与 pyproject.toml 的版本一致。Echo Live 资源和个人配置不包含在包中。
+GitHub Actions 在提交和 PR 上运行测试；手动打包生成 Windows onefile EXE 与 SHA256。推送 `v*` 标签后，测试、打包和自检通过才发布 Release；带 `-alpha`／`-beta` 或 `aN`／`bN`／`rcN` 后缀的标签发布为 Pre-Release。版本标签应与 `pyproject.toml` 一致。
 
-开发验证可执行 `python scripts/download-echolive.py` 下载上游最新发布版（不改动工作目录下已有的 Echo Live），再用 `scripts/browser-smoke.py 路径` 验证融合模式与 LAN editor。
+## 开发资料
 
+- [历史设计与验收记录](docs/v1-design.md)
+- [上游版本差异与兼容证据](docs/upstream-compatibility.md)
+- [固定参考版本](docs/reference-lock.json)
 
-### 阶段二：选区、短码和实时预览
+上游审计需要 Git、Python 和 Node.js；Node 不是程序运行依赖：
 
-主输入框可鼠标拖选文字或用 Shift+方向键选区，Ctrl+C 复制选中内容。点击粗体、斜体、下划线、删除线、上下标、字号、颜色和重置工具，可以给选中文字应用格式。短码源文与实时预览同步更新；发送使用相同的解析结果。终端预览显示文字样式与颜色，字号、动画、CSS 类和透明度以 Echo Live 网页为准。
+```powershell
+git clone https://github.com/sheep-realms/Echo-Live.git .reference/Echo-Live
+python scripts/audit-upstream.py
+node scripts/probe-upstream.cjs
+```
 
-`Shift+Enter` 把当前输入缓冲区复制到 compose，原缓冲区保留；compose 内 Enter 换行。主输入框默认用上下键切换历史（包括 `/` 开头的命令）；先按 Tab 进入补全选择后，上下键才切换候选，Enter 确认，Esc 退出；compose 用 Ctrl+Space 补全当前短码。主页选中文字时显示格式操作，输入 `/` 或 `@` 时显示补全提示，二者共用一个提示行；演出页选区或短码时显示格式栏。可在 `/settings input` 选择格式栏上下文显示、始终显示或始终隐藏。预览默认开启，可独立关闭；提示同样可关闭。
-
-主页顶栏显示版本、OSC / 发送目标和 L（字幕）/ H（历史）/ E（发送端）数量及承载状态。工作区为提示或选区操作行、按上下标动态扩展的预览、单行输入和发送 / 输入状态行；底栏显示消息修饰与页面入口。历史按时间、姓名、内容显示，系统生成的消息名称带下划线；姓名列按名称长度自适应，并随窗口宽度限制上限，为正文留出空间。默认保留 500 条完整记录，超限按 FIFO 淘汰，可在 `/settings history` 修改。
-
-演出页的逐行发送从游标所在行开始，跳过空行；等待所有目标字幕端反馈本句打印完成后，才开始计毫秒行间隔并发送下一句，不等待窗口隐藏。发送期间锁定编辑并高亮当前行，发送按钮变为暂停；暂停后可以修改内容或游标，从新游标所在行继续，并继续等待上一句尚未完成的打印。取消或 Esc 返回会停止后续发送并保留演出草稿；最后一句打印完成后清空演出草稿并自动返回主页。字幕端断开或没有打印完成反馈时暂停，保留草稿。断开的目标回连后自动清除断开提示，保持暂停，手动继续时从游标所在行重发；没有输出端的提示也会随可用输出恢复而清除，无需重新打开演出页。
-
-各页导航由居中 Tab 标签和下一行整行色带组成，中括号标识当前选中的页面；设置分类包含「所有设置」及各个分项。操作按钮统一单行、靠右固定在页面底部；演出页逐行开关、间隔和发送 / 返回共用一行，连接页客户端信息位于底部操作栏上方。格式操作使用中文名称。程序使用 `Capabilities` 位标志描述环境，目前仅定义 `HAS_ECHO_LIVE`，检测当前目录或 `EchoLive` 子目录，供页面可见性及后续 Companion 集成扩展使用。新配置默认使用「」引号和 20ms 模拟打字，已有配置保留显式值。
-
-检测到 Echo Live 时，设置导航均分为「TUI 设置」和「Echo-Live 设置」。后者使用侧边栏切换「字体」与「版本管理」：字体保存直接修改 `res/style/live-common/font-family.css` 的 `--echo-default-font-family` 变量，输入框只显示字体名称，读取时移除引号，保存时自动添加引号；支持逗号分隔的字体列表，`sans-serif` 等通用字体保留 CSS 关键词形式。保留其余样式，可恢复默认思源黑体，刷新前台页面生效。版本管理读取本地 `app.js`，可保存 GitHub 仓库选项（`owner/repo`），默认仍为 `sheep-realms/Echo-Live`；检查更新时也会保存当前仓库，通过所选仓库的发布 API 获取最新正式版并比较版本，可打开其发布页查看更新。网络失败或请求受限时可重试，检查更新不会安装或替换本地文件。
-
-底栏的模拟打字与模拟停顿关闭时显示空心圆 `○`，开启时显示毫秒数；停顿按配置的打印步数乘以打印间隔换算，例如 10 步 × 20ms 显示 200ms。
-
-- `@@`：任意位置输出一个字面 `@`，后续继续解析。例如 `@@b` 显示 `@b`，`@@ @b粗体` 显示 `@` 后接粗体。
-- `@b`、`@i`、`@u`、`@s`：粗体、斜体、下划线、删除线，叠加到 `@r` 重置。
-- `@+`、`@-`：在五档字号间调整；`@[#66ccff]` 支持 3/4/6/8 位十六进制颜色。
-- `@shout` 触发一次上游喊叫事件，`@rainbow` 应用彩虹样式；预览显示静态彩虹色，实际动画以网页为准。
-- `@<rainbow>` 使用 `echo-text-rainbow` 类；`@<:custom>` 使用自定义 CSS 类；`\@` 输出字面 @。
-
-表情码和图片码均保留为普通文本，不提供补全；Companion 和 Echo Live 版本托管继续后置。已有配置中的明确设置保留，新默认值不会覆盖个人配置。`/skip` 的播放与取消语义尚待独立实现。
+已有参考目录时跳过克隆。审计按固定标签读取 Git 对象，输出位于不提交、不打包的 `.reference/audit/`。协议探针使用内存浏览器和时钟替身，不替代真实浏览器、OBS 或 TUI 验证。
