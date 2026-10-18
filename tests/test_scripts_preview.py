@@ -51,6 +51,10 @@ def test_script_preview_aligns_cells_and_only_annotations_are_gray(settings):
     wire = prepare(text, settings).data["messages"][0]["message"]
     assert next(p for p in wire if p.get("text") == "2")["style"]["color"] == "#ff0000"
     assert preview("x@<super>2@rH@<sub>2", settings).plain.count("\n") == 2
+    hinted = preview("X@^2@rH@_2", settings, hint="zh-Hans")
+    assert hinted.plain.splitlines()[1].endswith("  zh-Hans")
+    assert all("zh-Hans" not in row for row in hinted.plain.splitlines()[::2])
+    assert hinted.get_style_at_offset(console, hinted.plain.index("zh-Hans")).dim
 
 
 @pytest.mark.parametrize("scheme", ["pinyin", "zhuyin"])

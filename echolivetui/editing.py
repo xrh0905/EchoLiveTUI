@@ -44,7 +44,7 @@ def format_selection(text, start, end, code):
     return text[:lo] + replacement + text[hi:], lo + len(code), lo + len(code) + len(selection)
 
 
-def preview(text, settings):
+def preview(text, settings, *, hint=None):
     """Preview the first logical line, with aligned rows for script text."""
     result = Text(no_wrap=True, overflow="crop")
     if not text.strip():
@@ -77,6 +77,8 @@ def preview(text, settings):
                 row.append(" " * cell_len(value))
         if newline:
             break
+    if hint:
+        rows["main"].append("  " + hint, style="dim #9eaeb9")
     used = [rows["main"]]
     if rows["super"].plain.strip():
         used.insert(0, rows["super"])

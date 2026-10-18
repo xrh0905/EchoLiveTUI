@@ -231,7 +231,9 @@ async def test_ui_debounce_stale_results_settings_and_no_command_requests(provid
         await wait_until(lambda: preview.state == "ready")
         assert [call[0] for call in state.calls] == [["latest"]]
         assert "ja:latest" in preview.query_one(Static).content.plain
-        assert "en" in preview.query_one(Static).content.plain
+        await pilot.pause()
+        assert "en" in app.query_one("#preview", Static).content.plain
+        assert "主轨：" not in preview.query_one(Static).content.plain
         old_gate = state.gate = asyncio.Event()
         entry.value = "slow"
         app.refresh_status()
@@ -318,6 +320,45 @@ async def test_ui_cached_preview_does_not_wait_for_debounce(provider, tmp_path, 
         await wait_until(lambda: preview.state == "ready")
         assert "ja:hello" in preview.query_one(Static).content.plain
         assert len(state.calls) == 1 and preview.request_task is None
+
+
+@pytest.mark.parametrize("eager", [False, True])
+async def test_ui_send_cached_translation_then_exit(provider, tmp_path, monkeypatch, eager):
+    from textual.widgets import Input
+    from echolivetui.translation_preview import TranslationPreview
+    monkeypatch.setattr("echolivetui.translation_preview.DEBOUNCE", .01)
+    service, state = provider
+    app = ui_app(tmp_path, service)
+    app.core.settings.values["message.typewriting"] = True
+    async with app.run_test() as pilot:
+        loop = asyncio.get_running_loop()
+        previous_factory = loop.get_task_factory()
+        if eager:
+            loop.set_task_factory(asyncio.eager_task_factory)
+        try:
+            entry = app.query_one("#entry", Input)
+            entry.value = "你好，世界！"
+            translated = app.query_one(TranslationPreview)
+            await wait_until(lambda: translated.state == "ready")
+            await pilot.press("enter")
+            await wait_until(lambda: app.submission_task is None)
+            assert not entry.has_class("sending") and entry.value == ""
+            assert app.core.hub.peers["live"].queue.qsize() == 1
+            assert len(state.calls) == 1
+            entry.value = "你好，世界！"
+            await pilot.press("enter")
+            await wait_until(lambda: app.submission_task is None)
+            assert entry.value == "" and app.core.hub.peers["live"].queue.qsize() == 2
+            assert len(state.calls) == 1
+            entry.value = "/status"
+            await pilot.press("enter")
+            await wait_until(lambda: app.submission_task is None)
+            assert entry.value == ""
+            entry.value = "/exit"
+            await pilot.press("enter")
+            await wait_until(lambda: not app.is_running)
+        finally:
+            loop.set_task_factory(previous_factory)
 
 
 @pytest.mark.parametrize("skip", [False, True])

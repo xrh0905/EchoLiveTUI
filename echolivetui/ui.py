@@ -28,6 +28,7 @@ from .capabilities import Capabilities
 from .playback import DeliveryUnavailable
 from .echolive_panel import EchoLivePanel
 from .language_controls import LanguageChoice, TargetLanguages
+from .languages import language_label
 from .translation_preview import TranslationPreview
 from .history import MessageReport
 from . import __version__
@@ -38,12 +39,20 @@ class DisplayText(Static):
 
 
 class MessagePreview(Static):
+    source_language = None
+
     def show_preview(self, text, settings):
+        self.preview_text, self.preview_settings = text, settings
         self.display = settings["input.preview"]
         if self.display:
-            content = preview(text, settings)
+            content = preview(text, settings, hint=language_label(self.source_language) if self.source_language else None)
             self.styles.height = content.plain.count("\n") + 1
             self.update(content)
+
+    def show_source_language(self, language):
+        self.source_language = language
+        if hasattr(self, "preview_text"):
+            self.show_preview(self.preview_text, self.preview_settings)
 
     def get_selection(self, selection):
         # Textual may include the drag end widget even with ALLOW_SELECT=False.
@@ -633,11 +642,13 @@ class ComposeScreen(HistoryPage):
                     self.app.core.hub.release_playback(self.pending_playback)
                     self.pending_playback = []
                 self.set_running(True)
-                self.send_task = asyncio.create_task(self.send_lines(interval / 1000))
+                task = asyncio.create_task(self.send_lines(interval / 1000))
+                self.send_task = None if task.done() else task
                 return
             self.set_running(True)
             self.query_one(TranslationPreview).flush()
-            self.send_task = asyncio.create_task(self.send_block())
+            task = asyncio.create_task(self.send_block())
+            self.send_task = None if task.done() else task
             return
         self.action_back()
 
@@ -1069,6 +1080,12 @@ class EchoApp(App, inherit_bindings=False):
         else:
             translations.clear()
 
+    @on(TranslationPreview.SourceLanguage)
+    def translation_language_changed(self, event):
+        event.stop()
+        if event.preview.is_mounted:
+            event.preview.parent.query_one(MessagePreview).show_source_language(event.language)
+
     @on(Input.Changed, "#entry")
     def input_changed(self, event):
         self.core.input_changed(event.value)
@@ -1156,7 +1173,10 @@ class EchoApp(App, inherit_bindings=False):
             return
         self.query_one("#translations", TranslationPreview).flush()
         event.input.add_class("sending")
-        self.submission_task = asyncio.create_task(self.execute_submission(command, text, event.input))
+        # Textual's normal runner uses eager tasks: a cached send or command
+        # can finish and clear its state before create_task returns.
+        task = asyncio.create_task(self.execute_submission(command, text, event.input))
+        self.submission_task = None if task.done() else task
 
     async def execute_submission(self, command, text, entry):
         try:

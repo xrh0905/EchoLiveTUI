@@ -3,6 +3,7 @@ import asyncio
 
 from rich.text import Text
 from textual.containers import VerticalScroll
+from textual.message import Message
 from textual.widgets import Static
 
 from .languages import language_label
@@ -12,11 +13,17 @@ DEBOUNCE = .5
 
 
 class TranslationPreview(VerticalScroll):
+    class SourceLanguage(Message):
+        def __init__(self, preview, language):
+            super().__init__()
+            self.preview, self.language = preview, language
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.key = None
         self.request_task = None
         self.state = "empty"
+        self.source_language = None
 
     def compose(self):
         yield Static("", markup=False)
@@ -35,9 +42,15 @@ class TranslationPreview(VerticalScroll):
         self.key = None
         self.state = "empty"
         self.display = False
+        self.set_source_language(None)
         if self.request_task:
             self.request_task.cancel()
             self.request_task = None
+
+    def set_source_language(self, language):
+        if language != self.source_language:
+            self.source_language = language
+            self.post_message(self.SourceLanguage(self, language))
 
     def show_text(self, text, *, literal=False):
         core = self.app.core
@@ -69,8 +82,8 @@ class TranslationPreview(VerticalScroll):
             return
         _, source, targets = self.key
         detected = result.detected_languages[0] if result else None
-        language = source or detected
-        text = Text("主轨：" + language_label(language) if language else "")
+        self.set_source_language(source or detected)
+        text = Text()
         for index, code in enumerate(targets):
             text.append(("\n" if text else "") + language_label(code) + "：", style="#9eaeb9")
             text.append(result.translations[0][index] if result else status)
