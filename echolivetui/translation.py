@@ -102,12 +102,14 @@ class TranslationService:
         for item in data:
             if not isinstance(item, dict) or not isinstance(item.get("translations"), list):
                 raise TranslationError("翻译响应格式无效")
-            mapping = {part.get("to"): part.get("text") for part in item["translations"] if isinstance(part, dict)}
+            mapping = {part.get("to"): part.get("text") for part in item["translations"]
+                       if isinstance(part, dict) and isinstance(part.get("to"), str)}
             if any(not isinstance(mapping.get(code), str) or not mapping[code].strip() for code in targets):
                 raise TranslationError("翻译响应缺少目标语言译文")
             translations.append(tuple(mapping[code] for code in targets))
             language = item.get("detectedLanguage")
-            detected.append(language.get("language") if isinstance(language, dict) else None)
+            code = language.get("language") if isinstance(language, dict) else None
+            detected.append(code if isinstance(code, str) else None)
         result = TranslationResult(tuple(translations), tuple(detected))
         self.cache[key] = result
         self.cache.move_to_end(key)

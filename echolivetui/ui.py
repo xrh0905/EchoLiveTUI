@@ -511,6 +511,9 @@ class ComposeScreen(HistoryPage):
         self.refresh_translation()
 
     def refresh_translation(self):
+        # Periodic refreshes can run while this page's children are mounting.
+        if not self.is_mounted or not self.query("#line-mode") or not self.query(TranslationPreview):
+            return
         area = self.query_one(TextArea)
         text = area.document.get_line(area.cursor_location[0]) if self.query_one("#line-mode", Checkbox).value else area.text
         self.query_one(TranslationPreview).show_text(text, literal=True)

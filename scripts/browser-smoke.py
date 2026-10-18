@@ -123,6 +123,20 @@ async def main():
                     history = await pages[2].locator("#echo-live-history-message-list").text_content()
                     assert history.count("TRACK_MAIN") == 1 and "SUB_TRACK_TWO" not in history and "子轨一" not in history
                     print("PASS parallel tracks: internal submit, slow child completion and main-only history", flush=True)
+                if "--translate" in sys.argv[2:]:
+                    assert version_tuple(core.server.hosting.version) >= (1, 9, 0)
+                    settings.values.update({"multitrack.enable": True, "multitrack.source_language": "",
+                                            "multitrack.target_languages": ["zh-Hans", "ja"]})
+                    playback = []
+                    await core.send("Hello world", playback=playback)
+                    await core.wait_for_printing(playback)
+                    result = await core.hub.translator.translate(["Hello world"], "", ["zh-Hans", "ja"])
+                    for page in pages[:2]:
+                        rendered = await page.locator(".echo-track").all_text_contents()
+                        assert len(rendered) == 3, rendered
+                        normalized = [text.replace("\u200b", "").replace("\u2002", " ") for text in rendered]
+                        assert normalized == ["Hello world", *result.translations[0]], normalized
+                    print("PASS live Edge translation: automatic source, ordered zh-Hans/ja browser tracks", flush=True)
                 editor = await context.new_page()
                 editor.on("pageerror", lambda error: errors.append(error.stack))
                 await editor.goto(f"http://{lan}:{port}/editor.html")
@@ -137,6 +151,11 @@ async def main():
                 assert (await pages[2].locator("#echo-live-history-message-list").text_content()).count("LAN_EDITOR_TEST") == 1
                 assert any(p.profile.role == "server" for p in core.hub.peers.values())
                 assert any("LAN_EDITOR_TEST" in line for line in logs)
+                if "--translate" in sys.argv[2:]:
+                    for page in pages[:2]:
+                        await page.wait_for_function("echo.state === 'stop'", polling=100)
+                        assert await page.locator(".echo-track").count() == 3
+                    print("PASS live Edge translation from LAN editor with main-only history", flush=True)
                 await core.server.set_lan(None)
                 assert not failures, failures
                 assert not errors, errors

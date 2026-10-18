@@ -1,5 +1,6 @@
 import asyncio
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 from aiohttp import web
 import pytest
@@ -70,6 +71,7 @@ async def test_http_errors_not_cached_or_retried_forever(provider, status):
 
 
 @pytest.mark.parametrize("payload", [{}, [], [{}], [{"translations": []}],
+                                      [{"translations": [{"to": [], "text": "bad"}]}],
                                       [{"translations": [{"to": "ja", "text": ""}]}]])
 async def test_missing_translation_is_failure(provider, payload):
     service, state = provider
@@ -147,15 +149,21 @@ async def test_core_send_strict_failure_skip_and_existing_tracks(provider, tmp_p
     service, state = provider
     core = make_core(tmp_path, service)
     core.paren_once = True
+    core.hub.peers["history"] = Peer(None, Profile("history", role="history"))
+    core.hub.osc.send_text = Mock(return_value=True)
     state.status = 503
     with pytest.raises(TranslationError, match="草稿已保留"):
         await core.send("main")
     assert core.paren_once and core.hub.peers["live"].queue.empty()
+    assert core.hub.peers["history"].control.empty()
+    core.hub.osc.send_text.assert_not_called()
     core.settings.values["multitrack.skip_errors"] = True
     await core.send("main")
     frame, _ = core.hub.peers["live"].queue.get_nowait()
     assert "track" not in frame["data"]["messages"][0]
     assert not core.paren_once
+    assert core.hub.peers["history"].control.qsize() == 1
+    core.hub.osc.send_text.assert_called_once_with("main")
     calls = len(state.calls)
     await core.send("main", tracks=[{"message": "authored"}])
     assert len(state.calls) == calls
@@ -316,3 +324,41 @@ async def test_ui_preview_scrolls_below_input_and_compose_tracks_cursor(provider
         page.query_one(TextArea).move_cursor((1, 0))
         await wait_until(lambda: translated.key and translated.key[0] == "second" and translated.state == "ready")
         assert page.query_one("#send").region.bottom <= page.region.bottom
+
+
+async def test_ui_performance_translates_and_waits_for_each_printed_line(provider, tmp_path, monkeypatch):
+    from textual.widgets import Button, Checkbox, Input, TextArea
+    from echolivetui.history import plain_message
+    monkeypatch.setattr("echolivetui.translation_preview.DEBOUNCE", 10)
+    service, state = provider
+    app = ui_app(tmp_path, service)
+    printed = []
+
+    async def acknowledge():
+        peer = app.core.hub.peers["live"]
+        for _ in range(2):
+            envelope, _ = await peer.queue.get()
+            printed.append(envelope)
+            receipt = peer.playbacks[id(envelope)]
+            receipt.sent.set()
+            peer.observe_playback("echo_printing", {"username": envelope["data"]["username"],
+                                                    "message": plain_message(envelope["data"]["messages"][0]["message"])})
+            peer.observe_playback("echo_state_update", {"state": "stop"})
+
+    async with app.run_test() as pilot:
+        app.core.compose_draft = "one\n\ntwo"
+        app.open_screen("compose")
+        await pilot.pause()
+        page = app.active_page
+        page.query_one(TextArea).move_cursor((0, 0))
+        page.query_one("#line-mode", Checkbox).value = True
+        page.query_one("#line-interval", Input).value = "0"
+        await pilot.pause()
+        task = asyncio.create_task(acknowledge())
+        page.query_one("#send", Button).press()
+        async with asyncio.timeout(3):
+            await task
+        await wait_until(lambda: app.active_page is None)
+        assert [c[0] for c in state.calls] == [["one"], ["two"]]
+        assert [p["data"]["messages"][0]["track"][0]["message"][0]["text"] for p in printed] == ["ja:one", "ja:two"]
+        assert app.core.compose_draft == ""
