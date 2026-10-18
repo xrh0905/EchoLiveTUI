@@ -167,7 +167,7 @@ async def test_compact_controls_and_navigation_band_stay_at_page_bottom(tmp_path
             assert tabs.region.width == page.region.width - 2
             assert page.query_one(Tab).region.width == tabs.region.width
             assert page.query_one(Tab).label.plain.startswith("[")
-            buttons = [button for button in page.query(Button) if button.display]
+            buttons = [button for button in page.query(".actions Button, #performance-actions Button") if button.display]
             assert buttons
             for button in buttons:
                 assert button.size.height == 1

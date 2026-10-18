@@ -173,3 +173,146 @@ async def test_settings_change_during_translation_keeps_draft(provider, tmp_path
     with pytest.raises(TranslationError, match="设置已更改"):
         await task
     assert core.hub.peers["live"].queue.empty()
+
+
+def ui_app(tmp_path, service):
+    from echolivetui.ui import EchoApp
+    settings = Settings(tmp_path / "s.yaml")
+    settings.values.update({"multitrack.enable": True, "multitrack.target_languages": ["ja", "ru"],
+                            "message.quote": False, "message.typewriting": False, "typing.enable": False})
+    app = EchoApp(settings, tmp_path, start_server=False)
+    app.core.hub.translator = service
+
+    class Socket:
+        async def close(self):
+            pass
+
+    app.core.hub.peers["live"] = Peer(Socket(), Profile("live", role="live"))
+    return app
+
+
+async def wait_until(predicate):
+    async with asyncio.timeout(3):
+        while not predicate():
+            await asyncio.sleep(.005)
+
+
+async def test_ui_debounce_stale_results_settings_and_no_command_requests(provider, tmp_path, monkeypatch):
+    from textual.widgets import Input, Static
+    from echolivetui.translation_preview import TranslationPreview
+    monkeypatch.setattr("echolivetui.translation_preview.DEBOUNCE", .05)
+    service, state = provider
+    app = ui_app(tmp_path, service)
+    async with app.run_test() as pilot:
+        entry = app.query_one("#entry", Input)
+        preview = app.query_one("#translations", TranslationPreview)
+        entry.value = "old"
+        app.refresh_status()
+        entry.value = "latest"
+        app.refresh_status()
+        await wait_until(lambda: preview.state == "ready")
+        assert [call[0] for call in state.calls] == [["latest"]]
+        assert "ja:latest" in preview.query_one(Static).content.plain
+        assert "en" in preview.query_one(Static).content.plain
+        old_gate = state.gate = asyncio.Event()
+        entry.value = "slow"
+        app.refresh_status()
+        await wait_until(lambda: len(state.calls) == 2)
+        state.gate = None
+        try:
+            entry.value = "newest"
+            app.refresh_status()
+            await wait_until(lambda: preview.state == "ready")
+            old_gate.set()
+            await pilot.pause()
+            assert "ja:newest" in preview.query_one(Static).content.plain
+            assert "ja:slow" not in preview.query_one(Static).content.plain
+        finally:
+            old_gate.set()
+        app.core.settings.values["multitrack.source_language"] = "en"
+        app.refresh_status()
+        await wait_until(lambda: preview.state == "ready")
+        assert ("from", "en") in state.calls[-1][1]
+        count = len(state.calls)
+        entry.value = "/help"
+        app.refresh_status()
+        await pilot.pause(.1)
+        assert not preview.display and len(state.calls) == count
+        app.core.settings.values["multitrack.enable"] = False
+        entry.value = "disabled"
+        app.refresh_status()
+        await pilot.pause(.1)
+        assert not preview.display and len(state.calls) == count
+
+
+async def test_ui_enter_flushes_debounce_is_readonly_and_cancellable(provider, tmp_path, monkeypatch):
+    from textual.widgets import Input
+    monkeypatch.setattr("echolivetui.translation_preview.DEBOUNCE", 10)
+    service, state = provider
+    app = ui_app(tmp_path, service)
+    state.gate = asyncio.Event()
+    async with app.run_test() as pilot:
+        entry = app.query_one("#entry", Input)
+        entry.value = "waiting"
+        await pilot.pause()
+        assert not state.calls
+        await pilot.press("enter")
+        await wait_until(lambda: bool(state.calls))
+        assert app.submission_task and entry.has_class("sending")
+        await pilot.press("x", "enter")
+        assert entry.value == "waiting" and len(state.calls) == 1
+        await pilot.press("escape")
+        await wait_until(lambda: app.submission_task is None)
+        assert entry.value == "waiting" and app.core.hub.peers["live"].queue.empty()
+        state.gate.set()
+        await pilot.press("enter")
+        await wait_until(lambda: app.submission_task is None)
+        assert entry.value == "" and app.core.hub.peers["live"].queue.qsize() == 1
+
+
+@pytest.mark.parametrize("skip", [False, True])
+async def test_ui_translation_failure_keeps_or_sends_draft(provider, tmp_path, monkeypatch, skip):
+    from textual.widgets import Input
+    monkeypatch.setattr("echolivetui.translation_preview.DEBOUNCE", 10)
+    service, state = provider
+    state.status = 503
+    app = ui_app(tmp_path, service)
+    app.core.settings.values["multitrack.skip_errors"] = skip
+    async with app.run_test() as pilot:
+        entry = app.query_one("#entry", Input)
+        entry.value = "draft"
+        await pilot.press("enter")
+        await wait_until(lambda: app.submission_task is None)
+        assert entry.value == ("" if skip else "draft")
+        assert app.core.hub.peers["live"].queue.qsize() == int(skip)
+        assert len(state.calls) == 1
+
+
+@pytest.mark.parametrize("width", [80, 40])
+async def test_ui_preview_scrolls_below_input_and_compose_tracks_cursor(provider, tmp_path, monkeypatch, width):
+    from textual.widgets import Checkbox, Input, TextArea
+    from echolivetui.translation_preview import TranslationPreview
+    monkeypatch.setattr("echolivetui.translation_preview.DEBOUNCE", .02)
+    service, state = provider
+    app = ui_app(tmp_path, service)
+    app.core.settings.values.update({"multitrack.target_languages": ["ja", "en", "ru", "zh-Hans"], "input.preview": False})
+    async with app.run_test(size=(width, 24)) as pilot:
+        entry = app.query_one("#entry", Input)
+        entry.value = "long text " * 50
+        preview = app.query_one("#translations", TranslationPreview)
+        await wait_until(lambda: preview.state == "ready")
+        await pilot.pause()
+        assert preview.region.y >= entry.region.bottom
+        assert preview.size.height <= 8 and preview.max_scroll_y > 0
+        assert app.query_one("#submission").region.bottom <= app.query_one("#footer").region.y
+        app.core.compose_draft = "first\nsecond"
+        app.open_screen("compose")
+        await pilot.pause()
+        page = app.active_page
+        translated = page.query_one(TranslationPreview)
+        await wait_until(lambda: translated.state == "ready")
+        assert translated.key[0] == "first\nsecond"
+        page.query_one("#line-mode", Checkbox).value = True
+        page.query_one(TextArea).move_cursor((1, 0))
+        await wait_until(lambda: translated.key and translated.key[0] == "second" and translated.state == "ready")
+        assert page.query_one("#send").region.bottom <= page.region.bottom

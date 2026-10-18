@@ -28,6 +28,7 @@ from .capabilities import Capabilities
 from .playback import DeliveryUnavailable
 from .echolive_panel import EchoLivePanel
 from .language_controls import LanguageChoice, TargetLanguages
+from .translation_preview import TranslationPreview
 from .history import MessageReport
 from . import __version__
 
@@ -125,6 +126,10 @@ class ComposerInput(Input):
             self.post_message(self.SelectionChanged())
 
     async def _on_key(self, event):
+        if self.has_class("sending") and event.key not in {"escape", "ctrl+c", "tab", "shift+tab"}:
+            event.prevent_default()
+            event.stop()
+            return
         if event.key == "shift+enter":
             event.prevent_default()
             event.stop()
@@ -144,6 +149,9 @@ class ComposerInput(Input):
         # Textual dispatches handlers along the MRO itself. Stop the default
         # dispatch after explicitly delegating, otherwise Input inserts twice.
         event.prevent_default()
+        if self.has_class("sending"):
+            event.stop()
+            return
         if "\n" in event.text or "\r" in event.text:
             start, end = self.selection
             lo, hi = sorted((start, end))
@@ -469,6 +477,7 @@ class ComposeScreen(HistoryPage):
             yield Static("", id="compose-suggestions", markup=False)
             yield FormatBar(id="compose-format")
             yield MessagePreview("", id="compose-preview", markup=False)
+            yield TranslationPreview(id="compose-translations")
             yield Static("", id="compose-error", markup=False)
             with Horizontal(id="performance-controls"):
                 yield Checkbox("逐行发送", id="line-mode", compact=True)
@@ -481,12 +490,14 @@ class ComposeScreen(HistoryPage):
     def on_mount(self):
         self.query_one(TextArea).focus()
         self.query_one("#compose-preview", MessagePreview).show_preview(self.app.core.compose_draft, self.app.core.settings)
+        self.refresh_translation()
 
     @on(TextArea.Changed)
     def changed(self, event):
         self.app.core.compose_draft = event.text_area.text
         self.app.core.input_changed(event.text_area.text, literal=True)
         self.query_one("#compose-preview", MessagePreview).show_preview(event.text_area.text, self.app.core.settings)
+        self.refresh_translation()
         row, column = event.text_area.cursor_location
         offset = sum(len(line) + 1 for line in event.text_area.text.split("\n")[:row]) + column
         choices, _ = completion(event.text_area.text, offset)
@@ -497,6 +508,12 @@ class ComposeScreen(HistoryPage):
     @on(Checkbox.Changed, "#line-mode")
     def line_mode_changed(self, event):
         self.query_one("#line-interval", Input).disabled = not event.value
+        self.refresh_translation()
+
+    def refresh_translation(self):
+        area = self.query_one(TextArea)
+        text = area.document.get_line(area.cursor_location[0]) if self.query_one("#line-mode", Checkbox).value else area.text
+        self.query_one(TranslationPreview).show_text(text, literal=True)
 
     def set_running(self, running):
         area = self.query_one(TextArea)
@@ -551,7 +568,9 @@ class ComposeScreen(HistoryPage):
                     continue
                 area.move_cursor((row, 0))
                 self.current_row = row
-                self.app.core.submit(lines[row], playback=self.pending_playback)
+                self.refresh_translation()
+                self.query_one(TranslationPreview).flush()
+                await self.app.core.send(lines[row], playback=self.pending_playback)
                 self.next_row = row + 1
                 self.query_one("#performance-state", Static).update(f"正在发送 {row + 1}/{len(lines)}")
                 completed_at = await self.app.core.wait_for_printing(self.pending_playback)
@@ -613,13 +632,23 @@ class ComposeScreen(HistoryPage):
                 self.set_running(True)
                 self.send_task = asyncio.create_task(self.send_lines(interval / 1000))
                 return
-            try:
-                self.app.core.submit(self.query_one(TextArea).text)
-            except (ValueError, OSError) as exc:
-                self.show_error(exc)
-                return
-            self.app.core.compose_draft = ""
+            self.set_running(True)
+            self.query_one(TranslationPreview).flush()
+            self.send_task = asyncio.create_task(self.send_block())
+            return
         self.action_back()
+
+    async def send_block(self):
+        try:
+            await self.app.core.send(self.query_one(TextArea).text)
+            self.app.core.compose_draft = ""
+            self.dismiss()
+        except (ValueError, OSError) as exc:
+            self.show_error(exc)
+        finally:
+            self.send_task = None
+            if self.is_mounted and self.app.active_page is self:
+                self.set_running(False)
 
     def action_back(self):
         self.app.core.cancel_typing()
@@ -923,6 +952,9 @@ class EchoApp(App, inherit_bindings=False):
     #peer-detail { height: auto; max-height: 4; }
     #multiline { height: 1fr; min-height: 3; scrollbar-size: 1 1; }
     #compose-preview, #compose-suggestions { height: 1; overflow: hidden; }
+    TranslationPreview { height: auto; scrollbar-size: 1 1; padding: 0 1; }
+    TranslationPreview Static { height: auto; }
+    ComposerInput.sending { background: #31554a; }
     #performance-controls { height: 1; dock: bottom; }
     #performance-actions { width: 1fr; min-width: 0; height: 1; align-horizontal: right; }
     #performance-controls Checkbox { width: auto; margin-right: 1; }
@@ -944,6 +976,7 @@ class EchoApp(App, inherit_bindings=False):
         self.completing = False
         self.pending_logs = []
         self.active_page = None
+        self.submission_task = None
 
     def compose(self):
         with Horizontal(id="top"):
@@ -959,6 +992,7 @@ class EchoApp(App, inherit_bindings=False):
             yield FormatBar(id="main-format")
             yield MessagePreview("", id="preview", markup=False)
             yield ComposerInput(placeholder="输入消息，或 /help", id="entry")
+            yield TranslationPreview(id="translations")
             with Horizontal(id="submission"):
                 yield DisplayText("", id="hints", markup=False)
                 yield DisplayText("", id="typing-state", markup=False)
@@ -1025,6 +1059,12 @@ class EchoApp(App, inherit_bindings=False):
         self.query_one("#typing-state", Static).update("正在输入 " + ("●" if typing else "○"))
         if isinstance(self.active_page, ComposeScreen) and self.active_page.query("#compose-error"):
             self.active_page.refresh_delivery_state()
+            self.active_page.refresh_translation()
+        translations = self.query_one("#translations", TranslationPreview)
+        if self.active_page is None:
+            translations.show_text(entry.value)
+        else:
+            translations.clear()
 
     @on(Input.Changed, "#entry")
     def input_changed(self, event):
@@ -1062,6 +1102,11 @@ class EchoApp(App, inherit_bindings=False):
         self.candidates, self.completing = [], False
 
     async def on_key(self, event):
+        if event.key == "escape" and self.submission_task:
+            event.prevent_default()
+            event.stop()
+            self.submission_task.cancel()
+            return
         if event.key == "escape" and self.active_page is not None and isinstance(self.focused, ComposerInput):
             event.prevent_default()
             event.stop()
@@ -1100,18 +1145,40 @@ class EchoApp(App, inherit_bindings=False):
         text = event.value
         try:
             command = parse(text)
+        except ValueError as exc:
+            self.query_one("#error", Static).update(str(exc))
+            self.query_one("#error").display = True
+            return
+        if self.submission_task:
+            return
+        self.query_one("#translations", TranslationPreview).flush()
+        event.input.add_class("sending")
+        self.submission_task = asyncio.create_task(self.execute_submission(command, text, event.input))
+
+    async def execute_submission(self, command, text, entry):
+        try:
             result = await execute(self.core, command)
             self.input_history.append(text)
             self.history_index = len(self.input_history)
-            event.input.value = ""
+            entry.value = ""
             self.query_one("#error").display = False
             if result:
                 self.open_screen(result.name, result.args)
+        except asyncio.CancelledError:
+            if self.is_mounted:
+                self.query_one("#error", Static).update("已取消发送，草稿已保留")
+                self.query_one("#error").display = True
         except (ValueError, OSError) as exc:
             self.query_one("#error", Static).update(str(exc))
             self.query_one("#error").display = True
+        finally:
+            self.submission_task = None
+            entry.remove_class("sending")
 
     def open_screen(self, name, args=()):
+        if self.submission_task and self.submission_task is not asyncio.current_task():
+            self.submission_task.cancel()
+        self.query_one("#translations", TranslationPreview).clear()
         self.core.cancel_typing()
         if name == "quit":
             self.exit()
@@ -1198,6 +1265,8 @@ class EchoApp(App, inherit_bindings=False):
             area.focus()
         else:
             entry = self.query_one("#entry", Input)
+            if entry.has_class("sending"):
+                return
             try:
                 updated, start, end = format_selection(entry.value, *entry.selection, event.code)
             except ValueError as exc:
@@ -1216,10 +1285,15 @@ class EchoApp(App, inherit_bindings=False):
             entry = self.query_one("#entry", Input)
             if getattr(self, "completion_state", None) != (entry.value, entry.cursor_position, entry.selected_text):
                 self.refresh_candidates(entry)
+        elif isinstance(self.active_page, ComposeScreen) and self.active_page.query(TranslationPreview):
+            self.active_page.refresh_translation()
         for bar in self.query(FormatBar):
             bar.refresh_visibility()
 
     async def on_unmount(self):
+        if self.submission_task:
+            self.submission_task.cancel()
+            await asyncio.gather(self.submission_task, return_exceptions=True)
         if hasattr(self, "interrupt_policy"):
             self.interrupt_policy.restore()
         await self.core.close()

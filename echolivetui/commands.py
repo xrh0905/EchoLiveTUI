@@ -89,7 +89,7 @@ async def execute(core, command):
     name, args = command.name, command.args
     settings = core.settings
     if name == "text":
-        core.submit(args[0])
+        await core.send(args[0])
     elif name in INTERACTIVE - {"source"}:
         core.cancel_typing()
         return command
