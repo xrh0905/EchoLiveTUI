@@ -52,13 +52,20 @@ class TranslationService:
         self.pending = {}
         self.closed = False
 
+    def cached(self, texts, source, targets):
+        key = tuple(texts), source, tuple(targets)
+        result = self.cache.get(key) if not self.closed else None
+        if result is not None:
+            self.cache.move_to_end(key)
+        return result
+
     async def translate(self, texts, source, targets):
         if self.closed:
             raise TranslationError("翻译服务已关闭")
         key = tuple(texts), source, tuple(targets)
-        if key in self.cache:
-            self.cache.move_to_end(key)
-            return self.cache[key]
+        cached = self.cached(*key)
+        if cached is not None:
+            return cached
         if not targets:
             raise TranslationError("请添加至少一种子轨语言")
         if not texts:
@@ -79,11 +86,15 @@ class TranslationService:
 
     async def _request(self, key):
         texts, source, targets = key
-        if self.session is None:
-            self.session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=self.timeout), trust_env=True,
-                                                 headers={"User-Agent": "EchoLiveTUI", "Content-Type": "application/json"})
         params = [("from", source), *(("to", code) for code in targets), ("isEnterpriseClient", "false")]
         try:
+            if self.session is None:
+                # Optional aiodns installs must not select a resolver incompatible
+                # with Windows' Proactor event loop.
+                connector = aiohttp.TCPConnector(resolver=aiohttp.ThreadedResolver())
+                self.session = aiohttp.ClientSession(connector=connector,
+                                                     timeout=aiohttp.ClientTimeout(total=self.timeout), trust_env=True,
+                                                     headers={"User-Agent": "EchoLiveTUI", "Content-Type": "application/json"})
             async with self.session.post(self.endpoint, params=params, json=list(texts)) as response:
                 if response.status == 429:
                     raise TranslationError("翻译请求受限（HTTP 429），请稍后重试")
@@ -94,7 +105,7 @@ class TranslationService:
             raise
         except TimeoutError:
             raise TranslationError("翻译请求超时，请重试") from None
-        except (aiohttp.ClientError, ValueError) as exc:
+        except (aiohttp.ClientError, ValueError, RuntimeError) as exc:
             raise TranslationError(f"翻译请求失败：{exc}") from exc
         if not isinstance(data, list) or len(data) != len(texts):
             raise TranslationError("翻译响应缺少对应段落")

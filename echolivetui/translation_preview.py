@@ -56,6 +56,11 @@ class TranslationPreview(VerticalScroll):
             return
         self.clear()
         self.key, self.state, self.display = key, "waiting", True
+        cached = core.hub.translator.cached([plain], key[1], key[2])
+        if cached is not None:
+            self.state = "ready"
+            self.render_status("", result=cached)
+            return
         self.render_status("等待翻译")
         self.request_task = asyncio.create_task(self.load(key, debounce=True))
 
@@ -64,9 +69,10 @@ class TranslationPreview(VerticalScroll):
             return
         _, source, targets = self.key
         detected = result.detected_languages[0] if result else None
-        text = Text("主轨：" + (language_label(source) if source else "自动检测" + (" → " + language_label(detected) if detected else "")))
+        language = source or detected
+        text = Text("主轨：" + language_label(language) if language else "")
         for index, code in enumerate(targets):
-            text.append("\n" + language_label(code) + "：", style="#9eaeb9")
+            text.append(("\n" if text else "") + language_label(code) + "：", style="#9eaeb9")
             text.append(result.translations[0][index] if result else status)
         self.query_one(Static).update(text)
 

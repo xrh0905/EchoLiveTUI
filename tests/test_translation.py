@@ -60,6 +60,16 @@ async def test_translation_batch_order_detect_cache_and_literal_tracks(provider)
     assert len(state.calls) == 3
 
 
+async def test_optional_dns_resolver_cannot_break_translation(provider, monkeypatch):
+    service, state = provider
+    incompatible = Mock(side_effect=RuntimeError("aiodns needs a SelectorEventLoop on Windows"))
+    monkeypatch.setattr("aiohttp.connector.DefaultResolver", incompatible)
+    result = await service.translate(["hello"], "", ["en"])
+    assert result.translations == (("en:hello",),)
+    incompatible.assert_not_called()
+    assert len(state.calls) == 1
+
+
 @pytest.mark.parametrize("status", [400, 429, 500, 503])
 async def test_http_errors_not_cached_or_retried_forever(provider, status):
     service, state = provider
@@ -226,6 +236,8 @@ async def test_ui_debounce_stale_results_settings_and_no_command_requests(provid
         entry.value = "slow"
         app.refresh_status()
         await wait_until(lambda: len(state.calls) == 2)
+        assert "主轨：" not in preview.query_one(Static).content.plain
+        assert not preview.query_one(Static).content.plain.startswith("\n")
         state.gate = None
         try:
             entry.value = "newest"
@@ -276,6 +288,36 @@ async def test_ui_enter_flushes_debounce_is_readonly_and_cancellable(provider, t
         await pilot.press("enter")
         await wait_until(lambda: app.submission_task is None)
         assert entry.value == "" and app.core.hub.peers["live"].queue.qsize() == 1
+
+
+async def test_ui_session_initialization_failure_shows_error(provider, tmp_path, monkeypatch):
+    from textual.widgets import Input, Static
+    from echolivetui.translation_preview import TranslationPreview
+    monkeypatch.setattr("echolivetui.translation_preview.DEBOUNCE", .01)
+    monkeypatch.setattr("aiohttp.ClientSession", Mock(side_effect=RuntimeError("session initialization failed")))
+    service, state = provider
+    app = ui_app(tmp_path, service)
+    async with app.run_test() as pilot:
+        app.query_one("#entry", Input).value = "hello"
+        preview = app.query_one("#translations", TranslationPreview)
+        await wait_until(lambda: preview.state == "error")
+        assert "session initialization failed" in preview.query_one(Static).content.plain
+        assert not state.calls
+
+
+async def test_ui_cached_preview_does_not_wait_for_debounce(provider, tmp_path, monkeypatch):
+    from textual.widgets import Input, Static
+    from echolivetui.translation_preview import TranslationPreview
+    monkeypatch.setattr("echolivetui.translation_preview.DEBOUNCE", 30)
+    service, state = provider
+    await service.translate(["hello"], "", ["ja", "ru"])
+    app = ui_app(tmp_path, service)
+    async with app.run_test() as pilot:
+        app.query_one("#entry", Input).value = "hello"
+        preview = app.query_one("#translations", TranslationPreview)
+        await wait_until(lambda: preview.state == "ready")
+        assert "ja:hello" in preview.query_one(Static).content.plain
+        assert len(state.calls) == 1 and preview.request_task is None
 
 
 @pytest.mark.parametrize("skip", [False, True])
