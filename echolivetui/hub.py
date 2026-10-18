@@ -246,7 +246,7 @@ class Hub:
             paragraph = translated["data"]["messages"][index]
             if not isinstance(paragraph, dict):
                 paragraph = translated["data"]["messages"][index] = {"message": paragraph}
-            tracks = result.tracks(result_index)
+            tracks = result.tracks(result_index, settings=self.settings)
             data = paragraph.get("data", {})
             speed = data.get("printSpeed", self.settings["message.print_speed"]) if isinstance(data, dict) else self.settings["message.print_speed"]
             for track in tracks:

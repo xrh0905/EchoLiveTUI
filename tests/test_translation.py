@@ -51,7 +51,8 @@ async def test_translation_batch_order_detect_cache_and_literal_tracks(provider)
     result = await service.translate(["hello", "world"], "", ["ja", "ru"])
     assert result.translations == (("ja:hello", "ru:hello"), ("ja:world", "ru:world"))
     assert result.detected_languages == ("en", "en")
-    assert result.tracks(1) == [{"message": [{"text": "ja:world"}]}, {"message": [{"text": "ru:world"}]}]
+    assert result.tracks(1) == [{"message": [{"text": "ja:world", "style": {"size": "small"}}]},
+                                {"message": [{"text": "ru:world", "style": {"size": "small"}}]}]
     assert state.calls == [(["hello", "world"], [("from", ""), ("to", "ja"), ("to", "ru"), ("isEnterpriseClient", "false")])]
     assert await service.translate(["hello", "world"], "", ["ja", "ru"]) is result
     assert len(state.calls) == 1
@@ -155,6 +156,26 @@ async def test_core_send_strips_formatting_and_preserves_literal_translation(pro
     assert paragraph_text([{"text": "wire", "typewrite": "ignored"}, {"data": {"emoji": "ignored"}}]) == "wire"
 
 
+@pytest.mark.parametrize("style,left,right", [("en", '"', '"'), ("cn", "“", "”"),
+                                              ("jp", "「", "」"), ("custom", "««", "»»")])
+async def test_automatic_tracks_use_small_and_follow_main_quotes(provider, tmp_path, style, left, right):
+    service, state = provider
+    core = make_core(tmp_path, service)
+    core.settings.values.update({"message.quote": True, "message.quote_style": style,
+                                 "message.quote_open": left, "message.quote_close": right})
+    await core.send("main")
+    sent, _ = core.hub.peers["live"].queue.get_nowait()
+    paragraph = sent["data"]["messages"][0]
+    assert "".join(part.get("text", "") for part in paragraph["message"]) == left + "main" + right
+    assert [track["message"][0] for track in paragraph["track"]] == [
+        {"text": left + code + ":main" + right, "style": {"size": "small"}} for code in ("ja", "ru")]
+    core.settings.values["message.quote"] = False
+    await core.send("main")
+    sent, _ = core.hub.peers["live"].queue.get_nowait()
+    assert sent["data"]["messages"][0]["track"][0]["message"][0] == {"text": "ja:main", "style": {"size": "small"}}
+    assert len(state.calls) == 1 and state.calls[0][0] == ["main"]
+
+
 async def test_core_send_strict_failure_skip_and_existing_tracks(provider, tmp_path):
     service, state = provider
     core = make_core(tmp_path, service)
@@ -177,6 +198,8 @@ async def test_core_send_strict_failure_skip_and_existing_tracks(provider, tmp_p
     calls = len(state.calls)
     await core.send("main", tracks=[{"message": "authored"}])
     assert len(state.calls) == calls
+    sent, _ = core.hub.peers["live"].queue.get_nowait()
+    assert sent["data"]["messages"][0]["track"][0]["message"] == "authored"
 
 
 async def test_settings_change_during_translation_keeps_draft(provider, tmp_path):
@@ -320,6 +343,13 @@ async def test_ui_cached_preview_does_not_wait_for_debounce(provider, tmp_path, 
         await wait_until(lambda: preview.state == "ready")
         assert "ja:hello" in preview.query_one(Static).content.plain
         assert len(state.calls) == 1 and preview.request_task is None
+        app.core.settings.values.update({"message.quote": True, "message.quote_style": "jp"})
+        app.refresh_status()
+        assert "「ja:hello」" in preview.query_one(Static).content.plain
+        app.core.settings.values["message.quote"] = False
+        app.refresh_status()
+        assert "「" not in preview.query_one(Static).content.plain
+        assert len(state.calls) == 1
 
 
 @pytest.mark.parametrize("eager", [False, True])

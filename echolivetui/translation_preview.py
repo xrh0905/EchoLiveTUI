@@ -24,6 +24,7 @@ class TranslationPreview(VerticalScroll):
         self.request_task = None
         self.state = "empty"
         self.source_language = None
+        self.format_key = None
 
     def compose(self):
         yield Static("", markup=False)
@@ -65,9 +66,16 @@ class TranslationPreview(VerticalScroll):
             self.clear()
             return
         key = plain, config["source_language"], tuple(config["target_languages"])
+        format_key = tuple(core.settings["message." + name] for name in ("quote", "quote_style", "quote_open", "quote_close"))
         if key == self.key:
+            if format_key != self.format_key:
+                self.format_key = format_key
+                cached = core.hub.translator.cached([plain], key[1], key[2])
+                if self.state == "ready" and cached is not None:
+                    self.render_status("", result=cached)
             return
         self.clear()
+        self.format_key = format_key
         self.key, self.state, self.display = key, "waiting", True
         cached = core.hub.translator.cached([plain], key[1], key[2])
         if cached is not None:
@@ -84,9 +92,10 @@ class TranslationPreview(VerticalScroll):
         detected = result.detected_languages[0] if result else None
         self.set_source_language(source or detected)
         text = Text()
+        tracks = result.tracks(settings=self.app.core.settings) if result else None
         for index, code in enumerate(targets):
             text.append(("\n" if text else "") + language_label(code) + "：", style="#9eaeb9")
-            text.append(result.translations[0][index] if result else status)
+            text.append(tracks[index]["message"][0]["text"] if tracks else status)
         self.query_one(Static).update(text)
 
     async def load(self, key, *, debounce):

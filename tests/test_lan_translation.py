@@ -57,12 +57,13 @@ async def test_lan_batches_eligible_paragraphs_keeps_wire_fields_and_accepts_onc
         assert state.calls[0][0] == ["main", "other"]
         assert paragraphs[0]["data"] == {"printSpeed": 42}
         assert paragraphs[0]["message"][0]["style"]["super"]
-        assert paragraphs[0]["track"][0]["message"][0]["text"] == "ja:main"
+        assert paragraphs[0]["track"][0]["message"][0]["text"] == "「ja:main」"
+        assert paragraphs[0]["track"][0]["message"][0]["style"] == {"size": "small"}
         assert paragraphs[0]["track"][0]["message"][0]["typewrite"]
         assert paragraphs[0]["track"][0]["data"] == {"printSpeed": 42}
         assert paragraphs[1]["track"][0]["message"][0]["text"] == "keep"
         assert "track" not in paragraphs[2]
-        assert paragraphs[3]["track"][1]["message"][0]["text"] == "ru:other"
+        assert paragraphs[3]["track"][1]["message"][0]["text"] == "「ru:other」"
         assert sent["target"] == raw["target"] and sent["from"] == raw["from"]
         assert raw == before
         assert len(published) == 1 and all("ja:" not in entry.message for entry in published[0])

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import aiohttp
 
 from .message import parse_message
+from .pipeline import quote_symbols
 
 EDGE_TRANSLATE = "https://edge.microsoft.com/translate/translatetext"
 
@@ -34,8 +35,10 @@ class TranslationResult:
     translations: tuple[tuple[str, ...], ...]
     detected_languages: tuple[str | None, ...]
 
-    def tracks(self, index=0):
-        return [{"message": [{"text": text}]} for text in self.translations[index]]
+    def tracks(self, index=0, *, settings=None):
+        left, right = quote_symbols(settings) if settings is not None and settings["message.quote"] else ("", "")
+        return [{"message": [{"text": left + text + right, "style": {"size": "small"}}]}
+                for text in self.translations[index]]
 
 
 @dataclass

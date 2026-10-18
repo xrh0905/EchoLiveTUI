@@ -145,7 +145,7 @@ class Core:
         error = None
         try:
             result = await self.hub.translator.translate([plain], config["source_language"], config["target_languages"])
-            tracks = result.tracks()
+            tracks = result.tracks(settings=self.settings)
         except TranslationError as exc:
             error = exc
             if not config["skip_errors"]:
