@@ -10,6 +10,7 @@ from .history import HistoryDelivery, MessageReport, entries_from_data
 from .message import typewrite_incoming
 from .osc import OscDelivery
 from .playback import PrintingReceipt
+from .translation import TranslationService
 
 
 @dataclass
@@ -106,6 +107,7 @@ class Hub:
         self.peers: dict[str, Peer] = {}
         self.history = HistoryDelivery(self)
         self.osc = OscDelivery(self)
+        self.translator = TranslationService()
 
     def log(self, text, level="info"):
         levels = {"error": 0, "warn": 1, "info": 2, "debug": 3}
@@ -262,5 +264,6 @@ class Hub:
 
     async def close(self):
         await asyncio.gather(*(p.close() for p in list(self.peers.values())))
+        await self.translator.close()
         self.peers.clear()
         self.history.pending.clear()

@@ -14,6 +14,7 @@ from .lan import choose_address, editor_url
 from .capabilities import Capabilities
 from .playback import DeliveryUnavailable
 from .history import MessageReport
+from .translation import TranslationError, editor_text
 
 # Remote listeners expire the typing hint themselves; OSC needs an explicit stop.
 TYPING_EXPIRY = 3.0
@@ -130,6 +131,31 @@ class Core:
         self.report(MessageReport(result))
         self.hub.log(f"已接受：字幕 {count} · 历史 {history_count}" + (" · OSC 已发送" if osc_sent else ""), "debug")
         return result
+
+    async def send(self, text, *, playback=None, tracks=None):
+        """Resolve automatic tracks before any broadcast, history or OSC effect."""
+        config = copy.deepcopy(self.settings.group("multitrack"))
+        if not config["enable"] or tracks:
+            return self.submit(text, playback=playback, tracks=tracks)
+        if not self.has_output:
+            raise DeliveryUnavailable("没有可发送的字幕端，草稿已保留；请连接或选择端点")
+        plain = editor_text(text)
+        if not plain.strip():
+            return self.submit(text, playback=playback, tracks=tracks)
+        error = None
+        try:
+            result = await self.hub.translator.translate([plain], config["source_language"], config["target_languages"])
+            tracks = result.tracks()
+        except TranslationError as exc:
+            error = exc
+            if not config["skip_errors"]:
+                raise TranslationError(f"{exc}；草稿已保留") from exc
+        if self.settings.group("multitrack") != config:
+            raise TranslationError("多轨道设置已更改，请重新发送；草稿已保留")
+        sent = self.submit(text, playback=playback, tracks=tracks)
+        if error:
+            self.report(f"翻译失败，已发送原消息：{error}")
+        return sent
 
     async def wait_for_printing(self, receipts):
         if not receipts:
